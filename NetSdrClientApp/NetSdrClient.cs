@@ -14,6 +14,7 @@ namespace NetSdrClientApp
 {
     public class NetSdrClient
     {
+        
        private readonly ITcpClient _tcpClient;
        private readonly IUdpClient _udpClient;
 
