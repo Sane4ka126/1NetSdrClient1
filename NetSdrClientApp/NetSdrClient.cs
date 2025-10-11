@@ -116,23 +116,24 @@ namespace NetSdrClientApp
             await SendTcpRequest(msg);
         }
 
-        private void _udpClient_MessageReceived(object? sender, byte[] e)
+#pragma warning disable S2325 // Event handler cannot be static
+private void _udpClient_MessageReceived(object? sender, byte[] e)
+{
+    NetSdrMessageHelper.TranslateMessage(e, out _, out _, out _, out byte[] body);
+    var samples = NetSdrMessageHelper.GetSamples(16, body);
+
+    Console.WriteLine($"Samples recieved: " + body.Select(b => Convert.ToString(b, toBase: 16)).Aggregate((l, r) => $"{l} {r}"));
+
+    using (FileStream fs = new FileStream("samples.bin", FileMode.Append, FileAccess.Write, FileShare.Read))
+    using (BinaryWriter sw = new BinaryWriter(fs))
+    {
+        foreach (var sample in samples)
         {
-            NetSdrMessageHelper.TranslateMessage(e, out _, out _, out _, out byte[] body);
-            var samples = NetSdrMessageHelper.GetSamples(16, body);
-            
-
-            Console.WriteLine($"Samples recieved: " + body.Select(b => Convert.ToString(b, toBase: 16)).Aggregate((l, r) => $"{l} {r}"));
-
-            using (FileStream fs = new FileStream("samples.bin", FileMode.Append, FileAccess.Write, FileShare.Read))
-            using (BinaryWriter sw = new BinaryWriter(fs))
-            {
-                foreach (var sample in samples)
-                {
-                    sw.Write((short)sample); //write 16 bit per sample as configured 
-                }
-            }
+            sw.Write((short)sample); //write 16 bit per sample as configured 
         }
+    }
+}
+#pragma warning restore S2325
 
         private TaskCompletionSource<byte[]>? responseTaskSource;
 
