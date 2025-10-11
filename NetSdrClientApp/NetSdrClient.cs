@@ -116,7 +116,7 @@ namespace NetSdrClientApp
             await SendTcpRequest(msg);
         }
 
-#pragma warning disable S2325 // Event handler cannot be static
+ #pragma warning disable S2325 // Event handler cannot be static
 private void _udpClient_MessageReceived(object? sender, byte[] e)
 {
     NetSdrMessageHelper.TranslateMessage(e, out _, out _, out _, out byte[] body);
