@@ -144,6 +144,7 @@ namespace NetSdrClientApp
                 return null;
             }
 
+            
             responseTaskSource = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
             var responseTask = responseTaskSource.Task;
 
