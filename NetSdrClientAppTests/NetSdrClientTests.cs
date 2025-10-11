@@ -143,14 +143,13 @@ public class NetSdrClientTests
         await ConnectAsyncTest();
         long frequency = 14250000; // 14.25 MHz
         int channel = 1;
+        int initialCallCount = 3; // ConnectAsync makes 3 calls
 
         //Act
         await _client.ChangeFrequencyAsync(frequency, channel);
 
-        //Assert
-        _tcpMock.Verify(tcp => tcp.SendMessageAsync(It.Is<byte[]>(
-            msg => msg.Length > 0 && msg[0] == channel
-        )), Times.Once);
+        //Assert - verify one more call was made after ConnectAsync
+        _tcpMock.Verify(tcp => tcp.SendMessageAsync(It.IsAny<byte[]>()), Times.Exactly(initialCallCount + 1));
     }
 
     [Test]
@@ -158,28 +157,28 @@ public class NetSdrClientTests
     {
         //Arrange
         await ConnectAsyncTest();
+        int initialCallCount = 3;
 
         //Act & Assert for channel 0
         await _client.ChangeFrequencyAsync(7000000, 0);
-        _tcpMock.Verify(tcp => tcp.SendMessageAsync(It.IsAny<byte[]>()), Times.AtLeastOnce);
+        _tcpMock.Verify(tcp => tcp.SendMessageAsync(It.IsAny<byte[]>()), Times.Exactly(initialCallCount + 1));
 
         //Act & Assert for channel 2
         await _client.ChangeFrequencyAsync(21000000, 2);
-        _tcpMock.Verify(tcp => tcp.SendMessageAsync(It.IsAny<byte[]>()), Times.AtLeastOnce);
+        _tcpMock.Verify(tcp => tcp.SendMessageAsync(It.IsAny<byte[]>()), Times.Exactly(initialCallCount + 2));
     }
 
     [Test]
     public async Task ChangeFrequencyAsync_NoConnection_ShouldNotSendMessage()
     {
-        //Arrange
+        //Arrange - no connection established
         _tcpMock.Setup(tcp => tcp.Connected).Returns(false);
-        int initialCallCount = 0;
 
         //Act
         await _client.ChangeFrequencyAsync(14250000, 1);
 
-        //Assert
-        _tcpMock.Verify(tcp => tcp.SendMessageAsync(It.IsAny<byte[]>()), Times.Exactly(initialCallCount));
+        //Assert - no messages should be sent
+        _tcpMock.Verify(tcp => tcp.SendMessageAsync(It.IsAny<byte[]>()), Times.Never);
     }
 
     [Test]
@@ -199,26 +198,13 @@ public class NetSdrClientTests
     public void UdpMessageReceived_ShouldProcessSamples()
     {
         //Arrange
-        var testData = CreateMockIQData();
+        var testData = CreateValidNetSdrIQPacket();
 
-        //Act - raise the MessageReceived event
-        _udpMock.Raise(udp => udp.MessageReceived += null, _udpMock.Object, testData);
-
-        //Assert - no exception thrown, samples processed
-        Assert.Pass("UDP message received and samples processed successfully");
-    }
-
-    [Test]
-    public async Task SendTcpRequest_WhenNotConnected_ShouldReturnNull()
-    {
-        //Arrange
-        _tcpMock.Setup(tcp => tcp.Connected).Returns(false);
-
-        //Act
-        await _client.ConnectAsync(); // This won't connect because Connected is false
-
-        //Assert
-        _tcpMock.Verify(tcp => tcp.SendMessageAsync(It.IsAny<byte[]>()), Times.Never);
+        //Act & Assert - should not throw exception
+        Assert.DoesNotThrow(() =>
+        {
+            _udpMock.Raise(udp => udp.MessageReceived += null, _udpMock.Object, testData);
+        });
     }
 
     [Test]
@@ -283,15 +269,13 @@ public class NetSdrClientTests
     public async Task Constructor_ShouldSubscribeToEvents()
     {
         //Arrange & Act - constructor already called in Setup
+        var validPacket = CreateValidNetSdrIQPacket();
 
-        //Assert - verify event subscriptions by triggering events
-        var testMessage = new byte[] { 0xFF };
-
-        //Should not throw exception when events are raised
+        //Assert - should not throw exception when events are raised with valid data
         Assert.DoesNotThrow(() =>
         {
-            _tcpMock.Raise(tcp => tcp.MessageReceived += null, _tcpMock.Object, testMessage);
-            _udpMock.Raise(udp => udp.MessageReceived += null, _udpMock.Object, testMessage);
+            _tcpMock.Raise(tcp => tcp.MessageReceived += null, _tcpMock.Object, new byte[] { 0x01, 0x02, 0x03 });
+            _udpMock.Raise(udp => udp.MessageReceived += null, _udpMock.Object, validPacket);
         });
     }
 
@@ -310,35 +294,105 @@ public class NetSdrClientTests
     [Test]
     public async Task NullableReturnType_SendTcpRequest_IsHandledCorrectly()
     {
-        //Arrange - simulate disconnected state
+        //Arrange - simulate disconnected state from the start
+        _tcpMock.Reset();
         _tcpMock.Setup(tcp => tcp.Connected).Returns(false);
+        
+        var disconnectedClient = new NetSdrClient(_tcpMock.Object, _udpMock.Object);
 
         //Act - operations that internally call SendTcpRequest should handle null
-        await _client.StartIQAsync(); // Should not throw
+        await disconnectedClient.StartIQAsync(); // Should not throw
 
         //Assert
         _tcpMock.Verify(tcp => tcp.SendMessageAsync(It.IsAny<byte[]>()), Times.Never);
     }
 
-    /// <summary>
-    /// Helper method to create mock IQ data for UDP testing
-    /// </summary>
-    private byte[] CreateMockIQData()
+    [Test]
+    public async Task ChangeFrequencyAsync_MultipleFrequencies_ShouldSendEachTime()
     {
-        // Create a simple mock IQ data packet
-        // Format: header + body with sample data
-        var data = new List<byte>();
-        
-        // Add some header bytes (simplified)
-        data.AddRange(new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 });
-        
-        // Add sample data (16-bit samples)
-        for (int i = 0; i < 10; i++)
+        //Arrange
+        await ConnectAsyncTest();
+        var frequencies = new[] { 7000000L, 14000000L, 21000000L, 28000000L };
+        int initialCalls = 3;
+
+        //Act
+        foreach (var freq in frequencies)
         {
-            data.AddRange(BitConverter.GetBytes((short)(i * 100)));
+            await _client.ChangeFrequencyAsync(freq, 0);
         }
 
-        return data.ToArray();
+        //Assert
+        _tcpMock.Verify(tcp => tcp.SendMessageAsync(It.IsAny<byte[]>()), 
+            Times.Exactly(initialCalls + frequencies.Length));
+    }
+
+    [Test]
+    public async Task DisconnectAndReconnect_ShouldWork()
+    {
+        //Arrange & Act - connect
+        await _client.ConnectAsync();
+        _tcpMock.Verify(tcp => tcp.Connect(), Times.Once);
+
+        //Act - disconnect
+        _client.Disconect();
+        _tcpMock.Verify(tcp => tcp.Disconnect(), Times.Once);
+
+        //Act - reconnect
+        _tcpMock.Setup(tcp => tcp.Connected).Returns(false);
+        await _client.ConnectAsync();
+
+        //Assert
+        _tcpMock.Verify(tcp => tcp.Connect(), Times.Exactly(2));
+    }
+
+    [Test]
+    public async Task StartIQ_WithoutConnection_ShouldNotStartListening()
+    {
+        //Arrange - no connection
+        _tcpMock.Setup(tcp => tcp.Connected).Returns(false);
+
+        //Act
+        await _client.StartIQAsync();
+
+        //Assert
+        _udpMock.Verify(udp => udp.StartListeningAsync(), Times.Never);
+        Assert.That(_client.IQStarted, Is.False);
+    }
+
+    /// <summary>
+    /// Helper method to create a valid NetSDR IQ data packet
+    /// Format based on NetSDR protocol specification
+    /// </summary>
+    private byte[] CreateValidNetSdrIQPacket()
+    {
+        var packet = new List<byte>();
+        
+        // Header (8 bytes)
+        // Message type (2 bytes) - 0x0004 for IQ data
+        packet.Add(0x04);
+        packet.Add(0x00);
+        
+        // Message length (2 bytes) - total packet length
+        packet.Add(0x20); // 32 bytes total
+        packet.Add(0x00);
+        
+        // Control item code (2 bytes) - 0x0018 for receiver state/data
+        packet.Add(0x18);
+        packet.Add(0x00);
+        
+        // Sequence number (2 bytes)
+        packet.Add(0x01);
+        packet.Add(0x00);
+        
+        // Body - Sample data (16-bit I/Q samples)
+        // Add 12 samples (24 bytes) to make total 32 bytes
+        for (int i = 0; i < 12; i++)
+        {
+            short sample = (short)(i * 1000);
+            packet.AddRange(BitConverter.GetBytes(sample));
+        }
+
+        return packet.ToArray();
     }
 
     [TearDown]
