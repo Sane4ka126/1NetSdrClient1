@@ -113,23 +113,23 @@ namespace NetSdrClientApp.Networking
 
         private async Task StartListeningAsync()
         {
-            // ✅ Виправлено: Видалені всі зайві перевірки
-            // Connected вже гарантує, що _stream != null і stream підключений
             if (!Connected)
             {
                 throw new InvalidOperationException("Not connected to a server.");
             }
 
+            // _cts гарантовано не null після Connect()
+            var cancellationToken = _cts!.Token;
+
             try
             {
                 Console.WriteLine($"Starting listening for incoming messages.");
 
-                // Тепер можемо безпечно використовувати _stream без ! operator
-                while (!(_cts?.Token.IsCancellationRequested ?? true))
+                while (!cancellationToken.IsCancellationRequested)
                 {
                     byte[] buffer = new byte[8194];
 
-                    int bytesRead = await _stream!.ReadAsync(new Memory<byte>(buffer), _cts?.Token ?? CancellationToken.None);
+                    int bytesRead = await _stream!.ReadAsync(new Memory<byte>(buffer), cancellationToken);
                     if (bytesRead > 0)
                     {
                         MessageReceived?.Invoke(this, buffer.AsSpan(0, bytesRead).ToArray());
