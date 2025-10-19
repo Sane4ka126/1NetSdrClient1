@@ -137,6 +137,7 @@ private void _udpClient_MessageReceived(object? sender, byte[] e)
 #pragma warning restore S2325
 
         private TaskCompletionSource<byte[]>? responseTaskSource;
+        
 
         private async Task<byte[]?> SendTcpRequest(byte[] msg)
         {
