@@ -15,7 +15,6 @@ namespace NetSdrClientApp.Tests.Networking
         private UdpClient? _testSender;
         private int _testPort;
         private CancellationTokenSource? _testCts;
-        
 
         [SetUp]
         public void SetUp()
@@ -239,7 +238,6 @@ namespace NetSdrClientApp.Tests.Networking
         {
             // Arrange
             var wrapper = new UdpClientWrapper(_testPort);
-            bool exceptionHandled = false;
 
             var listeningTask = Task.Run(async () =>
             {
@@ -249,7 +247,7 @@ namespace NetSdrClientApp.Tests.Networking
                 }
                 catch (ObjectDisposedException)
                 {
-                    exceptionHandled = true;
+                    // Expected - resource was disposed
                 }
                 catch (OperationCanceledException)
                 {
