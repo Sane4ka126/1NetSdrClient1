@@ -62,14 +62,12 @@ namespace NetSdrClientApp.Networking
             }
         }
 
-        // ✅ Тепер просто конвертує string -> byte[] і викликає основний метод
         public Task SendMessageAsync(string str)
         {
             var data = Encoding.UTF8.GetBytes(str);
             return SendMessageAsync(data);
         }
 
-        // ✅ Єдине місце з логікою відправки
         public async Task SendMessageAsync(byte[] data)
         {
             ValidateConnection();
@@ -85,7 +83,8 @@ namespace NetSdrClientApp.Networking
             }
         }
 
-        private void LogMessageSent(byte[] data)
+        // ✅ Fixed: Made static (addresses both SonarCloud issues on line 88)
+        private static void LogMessageSent(byte[] data)
         {
             var hexString = string.Join(" ", data.Select(b => b.ToString("x2")));
             Console.WriteLine($"Message sent: {hexString}");
@@ -115,7 +114,9 @@ namespace NetSdrClientApp.Networking
 
         private async Task StartListeningAsync()
         {
-            if (!Connected || _stream == null || !_stream.CanRead)
+            // ✅ Fixed: Removed redundant null check for _stream (line 131 issue)
+            // The Connected property already checks _stream != null
+            if (!Connected || !_stream.CanRead)
             {
                 throw new InvalidOperationException("Not connected to a server.");
             }
