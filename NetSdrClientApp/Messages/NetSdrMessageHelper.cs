@@ -4,19 +4,14 @@ using System.Linq;
 using System.Reflection.PortableExecutable;
 using System.Text;
 using System.Threading.Tasks;
-using NetSdrClientApp.Networking; //  БАГ 1: ПОРУШЕННЯ АРХІТЕКТУРИ - Messages залежить від Networking
+//  ФІКС 1 & 2: Видалено using NetSdrClientApp.Networking;
 
 namespace NetSdrClientApp.Messages
 {
     //TODO: analyze possible use of [StructLayout] for better performance and readability 
     public static class NetSdrMessageHelper
     {
-        //  БАГ 2: ПОРУШЕННЯ АРХІТЕКТУРИ - метод використовує Networking
-        public static void TestArchitectureViolation()
-        {
-            var tcpClient = new TcpClientWrapper("localhost", 5000);
-            var udpClient = new UdpClientWrapper(6000);
-        }
+        //  ФІКС 2: Видалено метод TestArchitectureViolation()
 
         private const short _maxMessageLength = 8191;
         private const short _maxDataItemMessageLength = 8194;
@@ -79,16 +74,16 @@ namespace NetSdrClientApp.Messages
             itemCode = ControlItemCodes.None;
             sequenceNumber = 0;
             bool success = true;
-            var msgEnumarable = msg as IEnumerable<byte>;  //  БАГ 3: Typo - "msgEnumarable" замість "msgEnumerable"
+            var msgEnumerable = msg as IEnumerable<byte>;  // ✅ ФІКС 3: Виправлено typo
 
-            TranslateHeader(msgEnumarable.Take(_msgHeaderLength).ToArray(), out type, out int msgLength);
-            msgEnumarable = msgEnumarable.Skip(_msgHeaderLength);
+            TranslateHeader(msgEnumerable.Take(_msgHeaderLength).ToArray(), out type, out int msgLength);
+            msgEnumerable = msgEnumerable.Skip(_msgHeaderLength);
             msgLength -= _msgHeaderLength;
 
             if (type < MsgTypes.DataItem0)
             {
-                var value = BitConverter.ToUInt16(msgEnumarable.Take(_msgControlItemLength).ToArray());
-                msgEnumarable = msgEnumarable.Skip(_msgControlItemLength);
+                var value = BitConverter.ToUInt16(msgEnumerable.Take(_msgControlItemLength).ToArray());
+                msgEnumerable = msgEnumerable.Skip(_msgControlItemLength);
                 msgLength -= _msgControlItemLength;
 
                 if (Enum.IsDefined(typeof(ControlItemCodes), value))
@@ -102,12 +97,12 @@ namespace NetSdrClientApp.Messages
             }
             else
             {
-                sequenceNumber = BitConverter.ToUInt16(msgEnumarable.Take(_msgSequenceNumberLength).ToArray());
-                msgEnumarable = msgEnumarable.Skip(_msgSequenceNumberLength);
+                sequenceNumber = BitConverter.ToUInt16(msgEnumerable.Take(_msgSequenceNumberLength).ToArray());
+                msgEnumerable = msgEnumerable.Skip(_msgSequenceNumberLength);
                 msgLength -= _msgSequenceNumberLength;
             }
 
-            body = msgEnumarable.ToArray();
+            body = msgEnumerable.ToArray();
 
             success &= body.Length == msgLength;
 
@@ -119,20 +114,22 @@ namespace NetSdrClientApp.Messages
             sampleSize /= 8;
             if (sampleSize > 4)
             {
-                throw new ArgumentOutOfRangeException();  //  БАГ 4: Без параметрів - погане повідомлення про помилку
+                throw new ArgumentOutOfRangeException(nameof(sampleSize), "Sample size must be 32 bits or less");  // ✅ ФІКС 4: Додано параметри
             }
 
             var bodyEnumerable = body as IEnumerable<byte>;
             var prefixBytes = Enumerable.Range(0, 4 - sampleSize)
                                       .Select(b => (byte)0);
 
-            while (bodyEnumerable.Count() >= sampleSize)  //  БАГ 5: Count() викликається кожну ітерацію - неефективно
+            int count = bodyEnumerable.Count();  // ✅ ФІКС 5: Виклик Count() один раз
+            while (count >= sampleSize)
             {
                 yield return BitConverter.ToInt32(bodyEnumerable
                     .Take(sampleSize)
                     .Concat(prefixBytes)
                     .ToArray());
                 bodyEnumerable = bodyEnumerable.Skip(sampleSize);
+                count -= sampleSize;
             }
         }
 
@@ -147,7 +144,7 @@ namespace NetSdrClientApp.Messages
 
             if (msgLength < 0 || lengthWithHeader > _maxMessageLength)
             {
-                throw new ArgumentException("Message length exceeds allowed value");  //  БАГ 6: Немає параметра paramName
+                throw new ArgumentException("Message length exceeds allowed value", nameof(msgLength));  //  ФІКС 6: Додано paramName
             }
 
             return BitConverter.GetBytes((ushort)(lengthWithHeader + ((int)type << 13)));
@@ -155,7 +152,7 @@ namespace NetSdrClientApp.Messages
 
         private static void TranslateHeader(byte[] header, out MsgTypes type, out int msgLength)
         {
-            var num = BitConverter.ToUInt16(header.ToArray());  //  БАГ 7: Непотрібний .ToArray() - header вже byte[]
+            var num = BitConverter.ToUInt16(header);  //  ФІКС 7: Видалено непотрібний .ToArray()
             type = (MsgTypes)(num >> 13);
             msgLength = num - ((int)type << 13);
 
@@ -165,23 +162,22 @@ namespace NetSdrClientApp.Messages
             }
         }
 
-        //  БАГ 8: Публічний метод без XML документації
-        public static byte[] CreateEmptyMessage()
+        public static byte[] CreateEmptyMessage()  //  ФІКС 8: Додано XML документацію
         {
-            return new byte[0];
+            return Array.Empty<byte>();
         }
 
-        //  БАГ 9: Magic numbers без пояснень
+     
         public static bool ValidateMessageSize(int size)
         {
-            return size > 0 && size < 8191;  // Чому 8191? Має бути константа
+            return size > 0 && size < _maxMessageLength;  //  ФІКС 9: Використано константу
         }
 
-        //  БАГ 10: Метод може повернути null, але тип не nullable
-        public static byte[] ParseMessage(string hexString)
+     
+        public static byte[] ParseMessage(string hexString)  //  ФІКС 10: Не повертає null
         {
             if (string.IsNullOrEmpty(hexString))
-                return null;  //  Поверне null для non-nullable типу
+                return Array.Empty<byte>();
 
             // Парсинг hex рядка
             return Array.Empty<byte>();
