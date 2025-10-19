@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -6,135 +7,77 @@ using System.Threading.Tasks;
 
 namespace NetSdrClientApp.Networking;
 
-public class TcpClientWrapper : ITcpClient
+public class UdpClientWrapper : IUdpClient
 {
-    private readonly string _host;  // ✅ Зробили readonly
-    private readonly int _port;     // ✅ Зробили readonly
-    private TcpClient? _tcpClient;
-    private NetworkStream? _stream;
-    private CancellationTokenSource? _cts;  // ✅ Nullable
+    private readonly IPEndPoint _localEndPoint;
+    private CancellationTokenSource? _cts;
+    private UdpClient? _udpClient;
 
     public event EventHandler<byte[]>? MessageReceived;
 
-    public bool Connected => _tcpClient?.Connected ?? false;
-
-    public TcpClientWrapper(string host, int port)
+    public UdpClientWrapper(int port)
     {
-        _host = host;
-        _port = port;
-        // ✅ _cts не ініціалізується в конструкторі, оскільки він nullable
+        _localEndPoint = new IPEndPoint(IPAddress.Any, port);
     }
 
-    public void Connect()
+    public async Task StartListeningAsync()
     {
-        try
-        {
-            _tcpClient = new TcpClient(_host, _port);
-            _stream = _tcpClient.GetStream();
-            _cts = new CancellationTokenSource();
-
-            Task.Run(() => ListenForMessagesAsync());
-
-            Console.WriteLine($"Connected to {_host}:{_port}");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Connection failed: {ex.Message}");
-        }
-    }
-
-    public void Disconnect()
-    {
-        try
-        {
-            _cts?.Cancel();
-            _cts?.Dispose();  // ✅ Dispose CancellationTokenSource
-            _stream?.Close();
-            _tcpClient?.Close();
-            Console.WriteLine("Disconnected from server.");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error while disconnecting: {ex.Message}");
-        }
-        finally
-        {
-            _cts = null;  // ✅ Присвоєння null через nullable
-        }
-    }
-
-    public async Task SendMessageAsync(byte[] message)
-    {
-        if (_stream == null || !_stream.CanWrite)
-        {
-            Console.WriteLine("Cannot send message. Stream is not available.");
-            return;
-        }
+        _cts = new CancellationTokenSource();
 
         try
         {
-            // ✅ Використовуємо ReadOnlyMemory<byte> overload
-            await _stream.WriteAsync(new ReadOnlyMemory<byte>(message), _cts?.Token ?? CancellationToken.None);
-            await _stream.FlushAsync(_cts?.Token ?? CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error sending message: {ex.Message}");
-        }
-    }
-
-    public async Task SendMessageAsync(string message)
-    {
-        if (_stream == null || !_stream.CanWrite)
-        {
-            Console.WriteLine("Cannot send message. Stream is not available.");
-            return;
-        }
-
-        try
-        {
-            byte[] data = Encoding.ASCII.GetBytes(message);
-            // ✅ Використовуємо ReadOnlyMemory<byte> overload
-            await _stream.WriteAsync(new ReadOnlyMemory<byte>(data), _cts?.Token ?? CancellationToken.None);
-            await _stream.FlushAsync(_cts?.Token ?? CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error sending message: {ex.Message}");
-        }
-    }
-
-    private async Task ListenForMessagesAsync()
-    {
-        byte[] buffer = new byte[4096];
-
-        try
-        {
-            while (_stream != null && _stream.CanRead && !(_cts?.Token.IsCancellationRequested ?? true))
+            _udpClient = new UdpClient(_localEndPoint);
+            while (!_cts.Token.IsCancellationRequested)
             {
-                // ✅ Використовуємо Memory<byte> overload
-                int bytesRead = await _stream.ReadAsync(new Memory<byte>(buffer), _cts?.Token ?? CancellationToken.None);
-
-                if (bytesRead > 0)
-                {
-                    byte[] receivedData = new byte[bytesRead];
-                    Array.Copy(buffer, receivedData, bytesRead);
-                    MessageReceived?.Invoke(this, receivedData);
-                }
-                else
-                {
-                    Console.WriteLine("Connection closed by server.");
-                    break;
-                }
+                UdpReceiveResult result = await _udpClient.ReceiveAsync(_cts.Token);
+                MessageReceived?.Invoke(this, result.Buffer);
             }
         }
         catch (OperationCanceledException)
         {
-            Console.WriteLine("Listening cancelled.");
+            // Normal cancellation, no action needed
+        }
+        catch (SocketException ex)
+        {
+            Console.WriteLine($"Socket error: {ex.Message}");
+        }
+        catch (ObjectDisposedException)
+        {
+            // Client was disposed, expected during shutdown
+        }
+    }
+
+    public void StopListening()
+    {
+        CleanupResources();
+    }
+
+    public void Exit()
+    {
+        CleanupResources();
+    }
+
+    private void CleanupResources()
+    {
+        try
+        {
+            _cts?.Cancel();
+            _cts?.Dispose();
+            _udpClient?.Close();
+            _udpClient?.Dispose();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error receiving message: {ex.Message}");
+            Console.WriteLine($"Error while stopping: {ex.Message}");
         }
+    }
+
+    public override int GetHashCode()
+    {
+        return HashCode.Combine(
+            nameof(UdpClientWrapper), 
+            _localEndPoint.Address, 
+            _localEndPoint.Port
+        );
     }
 }
