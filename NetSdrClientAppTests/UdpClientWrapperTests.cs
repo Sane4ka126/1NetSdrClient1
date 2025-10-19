@@ -204,7 +204,7 @@ namespace NetSdrClientApp.Tests.Networking
             // Arrange - створюємо wrapper з портом, який вже використовується
             var blocker = new UdpClient(_testPort);
             var wrapper = new UdpClientWrapper(_testPort);
-            bool socketExceptionThrown = false;
+            bool socketExceptionCaught = false;
 
             // Act
             var listeningTask = Task.Run(async () =>
@@ -213,16 +213,18 @@ namespace NetSdrClientApp.Tests.Networking
                 {
                     await wrapper.StartListeningAsync();
                 }
-                catch (SocketException)
+                catch (SocketException ex)
                 {
-                    socketExceptionThrown = true;
+                    socketExceptionCaught = true;
+                    Console.WriteLine($"Caught SocketException: {ex.Message}");
                 }
             });
 
-            await Task.Delay(500);
+            // Даємо час на спробу запуску
+            await Task.Delay(1000);
 
-            // Assert - повинен обробити SocketException
-            Assert.That(socketExceptionThrown, Is.True);
+            // Assert - повинен кинути SocketException
+            Assert.That(socketExceptionCaught, Is.True, "SocketException should be thrown when port is already in use");
 
             // Cleanup
             wrapper.StopListening();
