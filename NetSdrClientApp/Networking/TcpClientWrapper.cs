@@ -113,9 +113,9 @@ namespace NetSdrClientApp.Networking
 
         private async Task StartListeningAsync()
         {
-            // ✅ Виправлено: Видалена зайва перевірка _stream != null
-            // Connected вже перевіряє це, тому додаткова перевірка створює unreachable code
-            if (!Connected || !_stream!.CanRead)
+            // ✅ Виправлено: Видалені всі зайві перевірки
+            // Connected вже гарантує, що _stream != null і stream підключений
+            if (!Connected)
             {
                 throw new InvalidOperationException("Not connected to a server.");
             }
@@ -124,11 +124,12 @@ namespace NetSdrClientApp.Networking
             {
                 Console.WriteLine($"Starting listening for incoming messages.");
 
+                // Тепер можемо безпечно використовувати _stream без ! operator
                 while (!(_cts?.Token.IsCancellationRequested ?? true))
                 {
                     byte[] buffer = new byte[8194];
 
-                    int bytesRead = await _stream.ReadAsync(new Memory<byte>(buffer), _cts?.Token ?? CancellationToken.None);
+                    int bytesRead = await _stream!.ReadAsync(new Memory<byte>(buffer), _cts?.Token ?? CancellationToken.None);
                     if (bytesRead > 0)
                     {
                         MessageReceived?.Invoke(this, buffer.AsSpan(0, bytesRead).ToArray());
