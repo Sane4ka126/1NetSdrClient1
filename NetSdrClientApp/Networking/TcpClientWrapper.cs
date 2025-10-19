@@ -83,7 +83,6 @@ namespace NetSdrClientApp.Networking
             }
         }
 
-        // ✅ Fixed: Made static (addresses both SonarCloud issues on line 88)
         private static void LogMessageSent(byte[] data)
         {
             var hexString = string.Join(" ", data.Select(b => b.ToString("x2")));
@@ -114,9 +113,9 @@ namespace NetSdrClientApp.Networking
 
         private async Task StartListeningAsync()
         {
-            // ✅ Fixed: Removed redundant null check for _stream (line 131 issue)
-            // The Connected property already checks _stream != null
-            if (!Connected || !_stream.CanRead)
+            // ✅ Виправлено: Видалена зайва перевірка _stream != null
+            // Connected вже перевіряє це, тому додаткова перевірка створює unreachable code
+            if (!Connected || !_stream!.CanRead)
             {
                 throw new InvalidOperationException("Not connected to a server.");
             }
