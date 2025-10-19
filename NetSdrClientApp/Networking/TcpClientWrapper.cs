@@ -9,8 +9,8 @@ namespace NetSdrClientApp.Networking
 {
     public class TcpClientWrapper : ITcpClient
     {
-        private readonly string _host;  // ✅ readonly
-        private readonly int _port;     // ✅ readonly
+        private readonly string _host;
+        private readonly int _port;
         private TcpClient? _tcpClient;
         private NetworkStream? _stream;
         private CancellationTokenSource? _cts;
@@ -62,27 +62,37 @@ namespace NetSdrClientApp.Networking
             }
         }
 
-        public async Task SendMessageAsync(byte[] data)
-        {
-            if (!IsStreamWritable())
-            {
-                throw new InvalidOperationException("Not connected to a server.");
-            }
-
-            Console.WriteLine($"Message sent: " + data.Select(b => Convert.ToString(b, toBase: 16)).Aggregate((l, r) => $"{l} {r}"));
-            await _stream!.WriteAsync(new ReadOnlyMemory<byte>(data), _cts?.Token ?? CancellationToken.None);
-        }
-
-        public async Task SendMessageAsync(string str)
+        // ✅ Тепер просто конвертує string -> byte[] і викликає основний метод
+        public Task SendMessageAsync(string str)
         {
             var data = Encoding.UTF8.GetBytes(str);
-            
+            return SendMessageAsync(data);
+        }
+
+        // ✅ Єдине місце з логікою відправки
+        public async Task SendMessageAsync(byte[] data)
+        {
+            ValidateConnection();
+            LogMessageSent(data);
+            await SendDataAsync(data);
+        }
+
+        private void ValidateConnection()
+        {
             if (!IsStreamWritable())
             {
                 throw new InvalidOperationException("Not connected to a server.");
             }
+        }
 
-            Console.WriteLine($"Message sent: " + data.Select(b => Convert.ToString(b, toBase: 16)).Aggregate((l, r) => $"{l} {r}"));
+        private void LogMessageSent(byte[] data)
+        {
+            var hexString = string.Join(" ", data.Select(b => b.ToString("x2")));
+            Console.WriteLine($"Message sent: {hexString}");
+        }
+
+        private async Task SendDataAsync(byte[] data)
+        {
             await _stream!.WriteAsync(new ReadOnlyMemory<byte>(data), _cts?.Token ?? CancellationToken.None);
         }
 
@@ -94,7 +104,7 @@ namespace NetSdrClientApp.Networking
         private void CleanupResources()
         {
             _cts?.Cancel();
-            _cts?.Dispose();  // ✅ Dispose додано
+            _cts?.Dispose();
             _stream?.Close();
             _tcpClient?.Close();
 
