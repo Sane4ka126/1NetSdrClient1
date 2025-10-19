@@ -61,8 +61,11 @@ namespace NetSdrClientApp.Tests.Networking
             var wrapper = new TcpClientWrapper("localhost", 8080);
 
             // Assert
-            Assert.That(wrapper, Is.Not.Null);
-            Assert.That(wrapper.Connected, Is.False);
+            Assert.Multiple(() =>
+            {
+                Assert.That(wrapper, Is.Not.Null);
+                Assert.That(wrapper.Connected, Is.False);
+            });
         }
 
         [Test]
@@ -100,8 +103,12 @@ namespace NetSdrClientApp.Tests.Networking
         public void Connect_DoesNothing_WhenAlreadyConnected()
         {
             // Arrange
-            Assert.That(_testServer, Is.Not.Null);
-            Assert.That(_serverCts, Is.Not.Null);
+            Assert.Multiple(() =>
+            {
+                Assert.That(_testServer, Is.Not.Null);
+                Assert.That(_serverCts, Is.Not.Null);
+            });
+            
             _testServer.Start();
             var serverTask = AcceptClientAsync(_testServer, _serverCts.Token);
             var wrapper = new TcpClientWrapper("localhost", _testPort);
@@ -136,8 +143,12 @@ namespace NetSdrClientApp.Tests.Networking
         public async Task Disconnect_ClosesConnection_WhenConnected()
         {
             // Arrange
-            Assert.That(_testServer, Is.Not.Null);
-            Assert.That(_serverCts, Is.Not.Null);
+            Assert.Multiple(() =>
+            {
+                Assert.That(_testServer, Is.Not.Null);
+                Assert.That(_serverCts, Is.Not.Null);
+            });
+            
             _testServer.Start();
             var serverTask = AcceptClientAsync(_testServer, _serverCts.Token);
             var wrapper = new TcpClientWrapper("localhost", _testPort);
@@ -166,8 +177,12 @@ namespace NetSdrClientApp.Tests.Networking
         public async Task SendMessageAsync_ByteArray_SendsData_WhenConnected()
         {
             // Arrange
-            Assert.That(_testServer, Is.Not.Null);
-            Assert.That(_serverCts, Is.Not.Null);
+            Assert.Multiple(() =>
+            {
+                Assert.That(_testServer, Is.Not.Null);
+                Assert.That(_serverCts, Is.Not.Null);
+            });
+            
             _testServer.Start();
             var receivedData = new TaskCompletionSource<byte[]>();
             var serverTask = AcceptAndReceiveAsync(_testServer, receivedData, _serverCts.Token);
@@ -193,8 +208,12 @@ namespace NetSdrClientApp.Tests.Networking
         public async Task SendMessageAsync_String_SendsData_WhenConnected()
         {
             // Arrange
-            Assert.That(_testServer, Is.Not.Null);
-            Assert.That(_serverCts, Is.Not.Null);
+            Assert.Multiple(() =>
+            {
+                Assert.That(_testServer, Is.Not.Null);
+                Assert.That(_serverCts, Is.Not.Null);
+            });
+            
             _testServer.Start();
             var receivedData = new TaskCompletionSource<byte[]>();
             var serverTask = AcceptAndReceiveAsync(_testServer, receivedData, _serverCts.Token);
@@ -276,8 +295,11 @@ namespace NetSdrClientApp.Tests.Networking
             await Task.WhenAny(messageReceivedEvent.Task, Task.Delay(2000));
 
             // Assert
-            Assert.That(receivedMessage, Is.Not.Null);
-            Assert.That(receivedMessage, Is.EqualTo(new byte[] { 0xAA, 0xBB, 0xCC }));
+            Assert.Multiple(() =>
+            {
+                Assert.That(receivedMessage, Is.Not.Null);
+                Assert.That(receivedMessage, Is.EqualTo(new byte[] { 0xAA, 0xBB, 0xCC }));
+            });
 
             // Cleanup
             wrapper.Disconnect();
