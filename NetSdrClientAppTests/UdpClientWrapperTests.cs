@@ -15,6 +15,7 @@ namespace NetSdrClientApp.Tests.Networking
         private UdpClient? _testSender;
         private int _testPort;
         private CancellationTokenSource? _testCts;
+        
 
         [SetUp]
         public void SetUp()
