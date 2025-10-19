@@ -1,20 +1,28 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection.PortableExecutable;
 using System.Text;
 using System.Threading.Tasks;
+using NetSdrClientApp.Networking; //  БАГ 1: ПОРУШЕННЯ АРХІТЕКТУРИ - Messages залежить від Networking
 
 namespace NetSdrClientApp.Messages
 {
     //TODO: analyze possible use of [StructLayout] for better performance and readability 
     public static class NetSdrMessageHelper
     {
+        //  БАГ 2: ПОРУШЕННЯ АРХІТЕКТУРИ - метод використовує Networking
+        public static void TestArchitectureViolation()
+        {
+            var tcpClient = new TcpClientWrapper("localhost", 5000);
+            var udpClient = new UdpClientWrapper(6000);
+        }
+
         private const short _maxMessageLength = 8191;
         private const short _maxDataItemMessageLength = 8194;
-        private const short _msgHeaderLength = 2; //2 byte, 16 bit
-        private const short _msgControlItemLength = 2; //2 byte, 16 bit
-        private const short _msgSequenceNumberLength = 2; //2 byte, 16 bit
+        private const short _msgHeaderLength = 2;
+        private const short _msgControlItemLength = 2;
+        private const short _msgSequenceNumberLength = 2;
 
         public enum MsgTypes
         {
@@ -71,13 +79,13 @@ namespace NetSdrClientApp.Messages
             itemCode = ControlItemCodes.None;
             sequenceNumber = 0;
             bool success = true;
-            var msgEnumarable = msg as IEnumerable<byte>;
+            var msgEnumarable = msg as IEnumerable<byte>;  //  БАГ 3: Typo - "msgEnumarable" замість "msgEnumerable"
 
             TranslateHeader(msgEnumarable.Take(_msgHeaderLength).ToArray(), out type, out int msgLength);
             msgEnumarable = msgEnumarable.Skip(_msgHeaderLength);
             msgLength -= _msgHeaderLength;
 
-            if (type < MsgTypes.DataItem0) // get item code
+            if (type < MsgTypes.DataItem0)
             {
                 var value = BitConverter.ToUInt16(msgEnumarable.Take(_msgControlItemLength).ToArray());
                 msgEnumarable = msgEnumarable.Skip(_msgControlItemLength);
@@ -92,7 +100,7 @@ namespace NetSdrClientApp.Messages
                     success = false;
                 }
             }
-            else // get sequenceNumber
+            else
             {
                 sequenceNumber = BitConverter.ToUInt16(msgEnumarable.Take(_msgSequenceNumberLength).ToArray());
                 msgEnumarable = msgEnumarable.Skip(_msgSequenceNumberLength);
@@ -108,17 +116,17 @@ namespace NetSdrClientApp.Messages
 
         public static IEnumerable<int> GetSamples(ushort sampleSize, byte[] body)
         {
-            sampleSize /= 8; //to bytes
-            if (sampleSize  > 4)
+            sampleSize /= 8;
+            if (sampleSize > 4)
             {
-                throw new ArgumentOutOfRangeException();
+                throw new ArgumentOutOfRangeException();  //  БАГ 4: Без параметрів - погане повідомлення про помилку
             }
 
             var bodyEnumerable = body as IEnumerable<byte>;
             var prefixBytes = Enumerable.Range(0, 4 - sampleSize)
                                       .Select(b => (byte)0);
 
-            while (bodyEnumerable.Count() >= sampleSize)
+            while (bodyEnumerable.Count() >= sampleSize)  //  БАГ 5: Count() викликається кожну ітерацію - неефективно
             {
                 yield return BitConverter.ToInt32(bodyEnumerable
                     .Take(sampleSize)
@@ -132,7 +140,6 @@ namespace NetSdrClientApp.Messages
         {
             int lengthWithHeader = msgLength + 2;
 
-            //Data Items edge case
             if (type >= MsgTypes.DataItem0 && lengthWithHeader == _maxDataItemMessageLength)
             {
                 lengthWithHeader = 0;
@@ -140,7 +147,7 @@ namespace NetSdrClientApp.Messages
 
             if (msgLength < 0 || lengthWithHeader > _maxMessageLength)
             {
-                throw new ArgumentException("Message length exceeds allowed value");
+                throw new ArgumentException("Message length exceeds allowed value");  //  БАГ 6: Немає параметра paramName
             }
 
             return BitConverter.GetBytes((ushort)(lengthWithHeader + ((int)type << 13)));
@@ -148,7 +155,7 @@ namespace NetSdrClientApp.Messages
 
         private static void TranslateHeader(byte[] header, out MsgTypes type, out int msgLength)
         {
-            var num = BitConverter.ToUInt16(header.ToArray());
+            var num = BitConverter.ToUInt16(header.ToArray());  //  БАГ 7: Непотрібний .ToArray() - header вже byte[]
             type = (MsgTypes)(num >> 13);
             msgLength = num - ((int)type << 13);
 
@@ -156,6 +163,28 @@ namespace NetSdrClientApp.Messages
             {
                 msgLength = _maxDataItemMessageLength;
             }
+        }
+
+        //  БАГ 8: Публічний метод без XML документації
+        public static byte[] CreateEmptyMessage()
+        {
+            return new byte[0];
+        }
+
+        //  БАГ 9: Magic numbers без пояснень
+        public static bool ValidateMessageSize(int size)
+        {
+            return size > 0 && size < 8191;  // Чому 8191? Має бути константа
+        }
+
+        //  БАГ 10: Метод може повернути null, але тип не nullable
+        public static byte[] ParseMessage(string hexString)
+        {
+            if (string.IsNullOrEmpty(hexString))
+                return null;  //  Поверне null для non-nullable типу
+
+            // Парсинг hex рядка
+            return Array.Empty<byte>();
         }
     }
 }
