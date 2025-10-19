@@ -23,7 +23,6 @@ public class UdpClientWrapper : IUdpClient
     public async Task StartListeningAsync()
     {
         _cts = new CancellationTokenSource();
-
         try
         {
             _udpClient = new UdpClient(_localEndPoint);
@@ -40,6 +39,7 @@ public class UdpClientWrapper : IUdpClient
         catch (SocketException ex)
         {
             Console.WriteLine($"Socket error: {ex.Message}");
+            throw; // Re-throw для можливості обробки в тестах
         }
         catch (ObjectDisposedException)
         {
@@ -72,12 +72,22 @@ public class UdpClientWrapper : IUdpClient
         }
     }
 
+    // ✅ Виправлено: порівнюємо тільки порти, бо IPAddress.Any може бути різними інстансами
+    public override bool Equals(object? obj)
+    {
+        if (obj == null || GetType() != obj.GetType())
+        {
+            return false;
+        }
+
+        var other = (UdpClientWrapper)obj;
+        return _localEndPoint.Port == other._localEndPoint.Port;
+    }
 
     public override int GetHashCode()
     {
         return HashCode.Combine(
             nameof(UdpClientWrapper), 
-            _localEndPoint.Address, 
             _localEndPoint.Port
         );
     }
