@@ -1,8 +1,5 @@
 using System;
-using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -12,8 +9,8 @@ namespace NetSdrClientApp.Networking
 {
     public class TcpClientWrapper : ITcpClient
     {
-        private string _host;
-        private int _port;
+        private readonly string _host;  // ✅ readonly
+        private readonly int _port;     // ✅ readonly
         private TcpClient? _tcpClient;
         private NetworkStream? _stream;
         private CancellationTokenSource? _cts;
@@ -37,6 +34,7 @@ namespace NetSdrClientApp.Networking
             }
 
             _tcpClient = new TcpClient();
+
             try
             {
                 _cts = new CancellationTokenSource();
@@ -55,12 +53,7 @@ namespace NetSdrClientApp.Networking
         {
             if (Connected)
             {
-                _cts?.Cancel();
-                _stream?.Close();
-                _tcpClient?.Close();
-                _cts = null;
-                _tcpClient = null;
-                _stream = null;
+                CleanupResources();
                 Console.WriteLine("Disconnected.");
             }
             else
@@ -71,50 +64,61 @@ namespace NetSdrClientApp.Networking
 
         public async Task SendMessageAsync(byte[] data)
         {
-            await SendBytesAsync(data);
+            if (!IsStreamWritable())
+            {
+                throw new InvalidOperationException("Not connected to a server.");
+            }
+
+            Console.WriteLine($"Message sent: " + data.Select(b => Convert.ToString(b, toBase: 16)).Aggregate((l, r) => $"{l} {r}"));
+            await _stream!.WriteAsync(new ReadOnlyMemory<byte>(data), _cts?.Token ?? CancellationToken.None);
         }
 
         public async Task SendMessageAsync(string str)
         {
             var data = Encoding.UTF8.GetBytes(str);
-            await SendBytesAsync(data);
-        }
-
-        private async Task SendBytesAsync(byte[] data)
-        {
-            ValidateConnection();
-            LogSentMessage(data);
-            await _stream!.WriteAsync(data.AsMemory(0, data.Length));
-        }
-
-        private void ValidateConnection()
-        {
-            if (!Connected || _stream == null || !_stream.CanWrite)
+            
+            if (!IsStreamWritable())
             {
                 throw new InvalidOperationException("Not connected to a server.");
             }
+
+            Console.WriteLine($"Message sent: " + data.Select(b => Convert.ToString(b, toBase: 16)).Aggregate((l, r) => $"{l} {r}"));
+            await _stream!.WriteAsync(new ReadOnlyMemory<byte>(data), _cts?.Token ?? CancellationToken.None);
         }
 
-        private static void LogSentMessage(byte[] data)
+        private bool IsStreamWritable()
         {
-            var hexString = string.Join(" ", data.Select(b => Convert.ToString(b, 16)));
-            Console.WriteLine($"Message sent: {hexString}");
+            return Connected && _stream != null && _stream.CanWrite;
+        }
+
+        private void CleanupResources()
+        {
+            _cts?.Cancel();
+            _cts?.Dispose();  // ✅ Dispose додано
+            _stream?.Close();
+            _tcpClient?.Close();
+
+            _cts = null;
+            _tcpClient = null;
+            _stream = null;
         }
 
         private async Task StartListeningAsync()
         {
-            if (!Connected || _stream == null || !_stream.CanRead || _cts == null)
+            if (!Connected || _stream == null || !_stream.CanRead)
             {
                 throw new InvalidOperationException("Not connected to a server.");
             }
 
             try
             {
-                Console.WriteLine($"Starting listening for incomming messages.");
-                while (!_cts.Token.IsCancellationRequested)
+                Console.WriteLine($"Starting listening for incoming messages.");
+
+                while (!(_cts?.Token.IsCancellationRequested ?? true))
                 {
                     byte[] buffer = new byte[8194];
-                    int bytesRead = await _stream.ReadAsync(buffer.AsMemory(0, buffer.Length), _cts.Token);
+
+                    int bytesRead = await _stream.ReadAsync(new Memory<byte>(buffer), _cts?.Token ?? CancellationToken.None);
                     if (bytesRead > 0)
                     {
                         MessageReceived?.Invoke(this, buffer.AsSpan(0, bytesRead).ToArray());
@@ -123,7 +127,7 @@ namespace NetSdrClientApp.Networking
             }
             catch (OperationCanceledException)
             {
-                // Expected when cancellation is requested
+                // Normal cancellation, no action needed
             }
             catch (Exception ex)
             {
