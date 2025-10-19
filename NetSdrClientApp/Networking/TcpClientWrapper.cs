@@ -134,6 +134,7 @@ namespace NetSdrClientApp.Networking
                         MessageReceived?.Invoke(this, buffer.AsSpan(0, bytesRead).ToArray());
                     }
                 }
+                
             }
             catch (OperationCanceledException)
             {
