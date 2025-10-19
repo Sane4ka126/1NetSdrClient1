@@ -91,7 +91,7 @@ namespace NetSdrClientApp.Networking
 
         private async Task SendDataAsync(byte[] data)
         {
-            await _stream!.WriteAsync(new ReadOnlyMemory<byte>(data), _cts?.Token ?? CancellationToken.None);
+            await _stream!.WriteAsync(new ReadOnlyMemory<byte>(data), _cts!.Token);
         }
 
         private bool IsStreamWritable()
@@ -118,12 +118,11 @@ namespace NetSdrClientApp.Networking
                 throw new InvalidOperationException("Not connected to a server.");
             }
 
-            // _cts гарантовано не null після Connect()
             var cancellationToken = _cts!.Token;
 
             try
             {
-                Console.WriteLine($"Starting listening for incoming messages.");
+                Console.WriteLine("Starting listening for incoming messages.");
 
                 while (!cancellationToken.IsCancellationRequested)
                 {
