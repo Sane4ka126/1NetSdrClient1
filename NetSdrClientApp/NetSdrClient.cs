@@ -23,6 +23,7 @@ namespace NetSdrClientApp
 
         public NetSdrClient(ITcpClient tcpClient, IUdpClient udpClient)
         {
+            
             _tcpClient = tcpClient;
             _udpClient = udpClient;
 
