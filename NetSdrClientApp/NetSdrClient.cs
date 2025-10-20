@@ -19,6 +19,7 @@ namespace NetSdrClientApp
        private readonly ITcpClient _tcpClient;
        private readonly IUdpClient _udpClient;
 
+        
         public bool IQStarted { get; set; }
 
         public NetSdrClient(ITcpClient tcpClient, IUdpClient udpClient)
