@@ -4,3 +4,19 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Додаткові налаштування для кращого контролю
+    open-pull-requests-limit: 10
+    # Автоматично ребейзити PR при конфліктах
+    rebase-strategy: "auto"
+    # Групувати мінорні та патч оновлення
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    # Мітки для PR
+    labels:
+      - "dependencies"
+      - "nuget"
