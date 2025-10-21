@@ -42,9 +42,6 @@ jobs:
     name: Sonar Check
     runs-on: windows-latest
     
-    env:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -66,20 +63,22 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~\.sonar\cache
-          key: ${{ runner.os }}-sonar-v2
-          restore-keys: ${{ runner.os }}-sonar-v2
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
       
-      - name: Clean Install SonarScanner
+      - name: Install and Configure SonarScanner
         run: |
-          Write-Host "Removing old SonarScanner..." -ForegroundColor Yellow
-          dotnet tool uninstall --global dotnet-sonarscanner 2>$null
-          
-          Write-Host "Cleaning cache..." -ForegroundColor Yellow
-          Remove-Item -Path "$env:USERPROFILE\.dotnet\tools\.store\dotnet-sonarscanner" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "$env:USERPROFILE\.sonar" -Recurse -Force -ErrorAction SilentlyContinue
-          
           Write-Host "Installing SonarScanner..." -ForegroundColor Green
           dotnet tool install --global dotnet-sonarscanner --version 11.0.0
+          
+          Write-Host "Removing problematic config file..." -ForegroundColor Yellow
+          $configPath = "$env:USERPROFILE\.dotnet\tools\.store\dotnet-sonarscanner\11.0.0\dotnet-sonarscanner\11.0.0\tools\netcoreapp3.1\any\SonarQube.Analysis.xml"
+          if (Test-Path $configPath) {
+            Remove-Item $configPath -Force
+            Write-Host "✓ Config file removed" -ForegroundColor Green
+          } else {
+            Write-Host "Config file not found (OK)" -ForegroundColor Yellow
+          }
         shell: pwsh
       
       - name: Install Coverlet
@@ -94,6 +93,7 @@ jobs:
             /k:"Sane4ka126_1NetSdrClient1" `
             /o:"sane4ka126" `
             /d:sonar.host.url="https://sonarcloud.io" `
+            /d:sonar.token="${{ secrets.SONAR_TOKEN }}" `
             /d:sonar.cs.opencover.reportsPaths="coverage.opencover.xml" `
             /d:sonar.coverage.exclusions="**/Program.cs,**/*Tests.cs" `
             /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.yml" `
@@ -132,7 +132,7 @@ jobs:
         shell: pwsh
       
       - name: SonarScanner End
-        run: dotnet sonarscanner end
+        run: dotnet sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
         shell: pwsh
       
       - name: Upload coverage report
