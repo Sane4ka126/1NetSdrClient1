@@ -41,7 +41,7 @@ permissions:
 jobs:
   sonar-check:
     name: Sonar Check
-    runs-on: windows-latest   # безпечно для будь-яких .NET проектів
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -52,19 +52,22 @@ jobs:
 
       # 1) BEGIN: SonarScanner for .NET
       - name: SonarScanner Begin
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           dotnet tool install --global dotnet-sonarscanner
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
           dotnet sonarscanner begin `
-          /k:"Sane4ka126_1NetSdrClient1" `
-          /o:"sane4ka126" `
-          /d:sonar.token="${{ secrets.SONAR_TOKEN }}" `
-          /d:sonar.cs.opencover.reportsPaths="**/coverage.xml" `
-          /d:sonar.cpd.cs.minimumTokens=40 `
-          /d:sonar.cpd.cs.minimumLines=5 `
-          /d:sonar.exclusions=**/bin/**,**/obj/**,**/sonarcloud.yml `
-          /d:sonar.qualitygate.wait=true
+            /k:"Sane4ka126_1NetSdrClient1" `
+            /o:"sane4ka126" `
+            /d:sonar.token=$env:SONAR_TOKEN `
+            /d:sonar.cs.opencover.reportsPaths="**/coverage.xml" `
+            /d:sonar.cpd.cs.minimumTokens=40 `
+            /d:sonar.cpd.cs.minimumLines=5 `
+            /d:sonar.exclusions=**/bin/**,**/obj/**,**/sonarcloud.yml `
+            /d:sonar.qualitygate.wait=true
         shell: pwsh
+
       # 2) BUILD & TEST
       - name: Restore
         run: dotnet restore NetSdrClient.sln
@@ -77,7 +80,10 @@ jobs:
             /p:CoverletOutput=TestResults/coverage.xml `
             /p:CoverletOutputFormat=opencover
         shell: pwsh
+
       # 3) END: SonarScanner
       - name: SonarScanner End
-        run: dotnet sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: dotnet sonarscanner end /d:sonar.token=$env:SONAR_TOKEN
         shell: pwsh
