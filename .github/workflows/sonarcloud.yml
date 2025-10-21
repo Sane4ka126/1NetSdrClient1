@@ -26,34 +26,6 @@
 # Feel free to take a look at our documentation (https://docs.sonarcloud.io/getting-started/github/)
 # or reach out to our community forum if you need some help (https://community.sonarsource.com/c/help/sc/9)
 
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-# This workflow helps you trigger a SonarCloud analysis of your code and populates
-# GitHub Code Scanning alerts with the vulnerabilities found.
-# Free for open source project.
-
-# 1. Login to SonarCloud.io using your GitHub account
-
-# 2. Import your project on SonarCloud
-#     * Add your GitHub organization first, then add your repository as a new project.
-#     * Please note that many languages are eligible for automatic analysis,
-#       which means that the analysis will start automatically without the need to set up GitHub Actions.
-#     * This behavior can be changed in Administration > Analysis Method.
-#
-# 3. Follow the SonarCloud in-product tutorial
-#     * a. Copy/paste the Project Key and the Organization Key into the args parameter below
-#          (You'll find this information in SonarCloud. Click on "Information" at the bottom left)
-#
-#     * b. Generate a new token and add it to your Github repository's secrets using the name SONAR_TOKEN
-#          (On SonarCloud, click on your avatar on top-right > My account > Security
-#           or go directly to https://sonarcloud.io/account/security/)
-
-# Feel free to take a look at our documentation (https://docs.sonarcloud.io/getting-started/github/)
-# or reach out to our community forum if you need some help (https://community.sonarsource.com/c/help/sc/9)
-
 name: SonarCloud analysis
 
 on:
@@ -95,8 +67,12 @@ jobs:
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
       
-      - name: Install SonarScanner
-        run: dotnet tool install --global dotnet-sonarscanner
+      - name: Uninstall and Reinstall SonarScanner
+        run: |
+          dotnet tool uninstall --global dotnet-sonarscanner 2>$null
+          Remove-Item -Path "$env:USERPROFILE\.dotnet\tools\.store\dotnet-sonarscanner" -Recurse -Force -ErrorAction SilentlyContinue
+          dotnet tool install --global dotnet-sonarscanner
+        shell: pwsh
       
       - name: Install Coverlet
         run: dotnet add NetSdrClientAppTests/NetSdrClientAppTests.csproj package coverlet.msbuild
@@ -115,6 +91,8 @@ jobs:
             /d:sonar.coverage.exclusions="**/Program.cs,**/*Tests.cs" `
             /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.yml" `
             /d:sonar.qualitygate.wait=true
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         shell: pwsh
       
       - name: Build
@@ -151,6 +129,8 @@ jobs:
       
       - name: SonarScanner End
         run: dotnet sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         shell: pwsh
       
       - name: Upload coverage report
