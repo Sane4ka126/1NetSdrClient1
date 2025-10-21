@@ -59,25 +59,28 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       
-      - name: Cache SonarCloud packages
-        uses: actions/cache@v4
-        with:
-          path: ~\.sonar\cache
-          key: ${{ runner.os }}-sonar
-          restore-keys: ${{ runner.os }}-sonar
-      
-      - name: Install and Configure SonarScanner
+      - name: Install and Fix SonarScanner
         run: |
-          Write-Host "Installing SonarScanner..." -ForegroundColor Green
-          dotnet tool install --global dotnet-sonarscanner --version 11.0.0
+          Write-Host "Uninstalling old version..." -ForegroundColor Yellow
+          dotnet tool uninstall --global dotnet-sonarscanner 2>$null
           
-          Write-Host "Removing problematic config file..." -ForegroundColor Yellow
+          Write-Host "Cleaning directories..." -ForegroundColor Yellow
+          Remove-Item -Path "$env:USERPROFILE\.dotnet\tools\.store\dotnet-sonarscanner" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "$env:USERPROFILE\.sonar" -Recurse -Force -ErrorAction SilentlyContinue
+          
+          Write-Host "Installing SonarScanner..." -ForegroundColor Green
+          dotnet tool install --global dotnet-sonarscanner
+          
+          Write-Host "Creating clean config..." -ForegroundColor Cyan
           $configPath = "$env:USERPROFILE\.dotnet\tools\.store\dotnet-sonarscanner\11.0.0\dotnet-sonarscanner\11.0.0\tools\netcoreapp3.1\any\SonarQube.Analysis.xml"
+          $configContent = @"
+<?xml version="1.0" encoding="utf-8"?>
+<SonarQubeAnalysisProperties xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns="http://www.sonarsource.com/msbuild/integration/2015/1">
+</SonarQubeAnalysisProperties>
+"@
           if (Test-Path $configPath) {
-            Remove-Item $configPath -Force
-            Write-Host "✓ Config file removed" -ForegroundColor Green
-          } else {
-            Write-Host "Config file not found (OK)" -ForegroundColor Yellow
+            Set-Content -Path $configPath -Value $configContent -Force
+            Write-Host "✓ Config fixed!" -ForegroundColor Green
           }
         shell: pwsh
       
