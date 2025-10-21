@@ -67,10 +67,16 @@ jobs:
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
       
-      - name: Uninstall and Reinstall SonarScanner
+      - name: Clean and Install SonarScanner
         run: |
+          Write-Host "Uninstalling old SonarScanner..." -ForegroundColor Yellow
           dotnet tool uninstall --global dotnet-sonarscanner 2>$null
+          
+          Write-Host "Removing cache directories..." -ForegroundColor Yellow
           Remove-Item -Path "$env:USERPROFILE\.dotnet\tools\.store\dotnet-sonarscanner" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "$env:USERPROFILE\.sonar" -Recurse -Force -ErrorAction SilentlyContinue
+          
+          Write-Host "Installing fresh SonarScanner..." -ForegroundColor Green
           dotnet tool install --global dotnet-sonarscanner
         shell: pwsh
       
@@ -91,8 +97,6 @@ jobs:
             /d:sonar.coverage.exclusions="**/Program.cs,**/*Tests.cs" `
             /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.yml" `
             /d:sonar.qualitygate.wait=true
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         shell: pwsh
       
       - name: Build
@@ -129,8 +133,6 @@ jobs:
       
       - name: SonarScanner End
         run: dotnet sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         shell: pwsh
       
       - name: Upload coverage report
