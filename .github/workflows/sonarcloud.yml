@@ -42,28 +42,23 @@ jobs:
   sonar-check:
     name: Sonar Check
     runs-on: windows-latest
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with: 
-          fetch-depth: 0  # Shallow clones should be disabled for better analysis
+          fetch-depth: 0
       
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
       
-      - name: Setup Java (required by SonarScanner)
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-      
-      - name: Install SonarScanner
-        run: |
-          dotnet tool install --global dotnet-sonarscanner
-          echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
-        shell: pwsh
       
       - name: Cache SonarCloud packages
         uses: actions/cache@v4
@@ -72,76 +67,68 @@ jobs:
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
       
+      - name: Install SonarScanner
+        run: dotnet tool install --global dotnet-sonarscanner
+      
+      - name: Install Coverlet
+        run: dotnet add NetSdrClientAppTests/NetSdrClientAppTests.csproj package coverlet.msbuild
+      
+      - name: Restore dependencies
+        run: dotnet restore NetSdrClient.sln
+      
       - name: SonarScanner Begin
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           dotnet sonarscanner begin `
             /k:"Sane4ka126_1NetSdrClient1" `
             /o:"sane4ka126" `
             /d:sonar.host.url="https://sonarcloud.io" `
-            /d:sonar.token="${env:SONAR_TOKEN}" `
-            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml" `
+            /d:sonar.login="${{ secrets.SONAR_TOKEN }}" `
+            /d:sonar.cs.opencover.reportsPaths="coverage.opencover.xml" `
             /d:sonar.coverage.exclusions="**/Program.cs,**/*Tests.cs" `
-            /d:sonar.cpd.exclusions="**/Program.cs" `
-            /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.yml,**/.github/**" `
-            /d:sonar.qualitygate.wait=true `
-            /d:sonar.qualitygate.timeout=300
+            /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.yml" `
+            /d:sonar.qualitygate.wait=true
         shell: pwsh
-      
-      - name: Restore dependencies
-        run: dotnet restore NetSdrClient.sln
       
       - name: Build
         run: dotnet build NetSdrClient.sln -c Release --no-restore
       
-      - name: Test with coverage
+      - name: Test with Coverlet
         run: |
+          Write-Host "=== Running tests with Coverlet ===" -ForegroundColor Cyan
           dotnet test NetSdrClientAppTests/NetSdrClientAppTests.csproj `
             -c Release `
             --no-build `
-            --collect:"XPlat Code Coverage" `
-            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
-        shell: pwsh
-      
-      - name: Find and copy coverage report
-        run: |
-          Write-Host "Searching for coverage files..."
-          $coverageFiles = Get-ChildItem -Path "NetSdrClientAppTests/TestResults" -Filter "coverage.opencover.xml" -Recurse
+            /p:CollectCoverage=true `
+            /p:CoverletOutputFormat=opencover `
+            /p:CoverletOutput="../coverage.opencover.xml" `
+            /p:ExcludeByFile="**/Program.cs"
           
-          if ($coverageFiles) {
-            foreach ($file in $coverageFiles) {
-              Write-Host "Found coverage file: $($file.FullName)"
-              $destPath = "NetSdrClientAppTests/TestResults/coverage.opencover.xml"
-              Copy-Item $file.FullName -Destination $destPath -Force
-              Write-Host "Copied to: $destPath"
-              
-              # Verify file exists and has content
-              if (Test-Path $destPath) {
-                $size = (Get-Item $destPath).Length
-                Write-Host "Coverage file size: $size bytes"
-              }
+          if (Test-Path "coverage.opencover.xml") {
+            $size = [math]::Round((Get-Item "coverage.opencover.xml").Length / 1KB, 2)
+            Write-Host "`n✓ Coverage file created: coverage.opencover.xml ($size KB)" -ForegroundColor Green
+            
+            # Display summary
+            $xml = [xml](Get-Content "coverage.opencover.xml")
+            $summary = $xml.CoverageSession.Summary
+            if ($summary) {
+              Write-Host "`n=== Coverage Summary ===" -ForegroundColor Cyan
+              Write-Host "Line Coverage: $($summary.lineCoverage)%" -ForegroundColor White
+              Write-Host "Branch Coverage: $($summary.branchCoverage)%" -ForegroundColor White
             }
           } else {
-            Write-Host "WARNING: No coverage files found!"
-            Write-Host "Contents of TestResults:"
-            Get-ChildItem -Path "NetSdrClientAppTests/TestResults" -Recurse | Format-Table Name, FullName
+            Write-Host "`n✗ Coverage file not created!" -ForegroundColor Red
+            exit 1
           }
         shell: pwsh
       
       - name: SonarScanner End
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: dotnet sonarscanner end /d:sonar.token="${env:SONAR_TOKEN}"
+        run: dotnet sonarscanner end /d:sonar.login="${{ secrets.SONAR_TOKEN }}"
         shell: pwsh
       
-      - name: Upload coverage artifacts (for debugging)
+      - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-reports
-          path: |
-            **/TestResults/**/*.xml
-            **/coverage.*.xml
+          name: coverage-report
+          path: coverage.opencover.xml
           retention-days: 5
