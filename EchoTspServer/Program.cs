@@ -30,7 +30,7 @@ namespace EchoServer
     }
 
     // Реальні реалізації для production
-    public class TcpListenerWrapper : ITcpListenerWrapper
+    public sealed class TcpListenerWrapper : ITcpListenerWrapper
     {
         private readonly TcpListener _listener;
 
@@ -49,9 +49,10 @@ namespace EchoServer
         }
     }
 
-    public class TcpClientWrapper : ITcpClientWrapper
+    public sealed class TcpClientWrapper : ITcpClientWrapper
     {
         private readonly TcpClient _client;
+        private bool _disposed;
 
         public TcpClientWrapper(TcpClient client)
         {
@@ -64,12 +65,30 @@ namespace EchoServer
         }
 
         public void Close() => _client.Close();
-        public void Dispose() => _client.Dispose();
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    _client?.Dispose();
+                }
+                _disposed = true;
+            }
+        }
     }
 
-    public class NetworkStreamWrapper : INetworkStreamWrapper
+    public sealed class NetworkStreamWrapper : INetworkStreamWrapper
     {
         private readonly NetworkStream _stream;
+        private bool _disposed;
 
         public NetworkStreamWrapper(NetworkStream stream)
         {
@@ -86,19 +105,36 @@ namespace EchoServer
             return _stream.WriteAsync(buffer, offset, count, token);
         }
 
-        public void Dispose() => _stream.Dispose();
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    _stream?.Dispose();
+                }
+                _disposed = true;
+            }
+        }
     }
 
     // Рефакторений EchoServer з інжекцією залежностей
-    public class EchoServer
+    public sealed class EchoServer : IDisposable
     {
         private readonly int _port;
         private readonly Func<IPAddress, int, ITcpListenerWrapper> _listenerFactory;
         private readonly ILogger _logger;
-        private ITcpListenerWrapper _listener;
-        private CancellationTokenSource _cancellationTokenSource;
+        private ITcpListenerWrapper? _listener;
+        private readonly CancellationTokenSource _cancellationTokenSource;
+        private bool _disposed;
 
-        public EchoServer(int port, Func<IPAddress, int, ITcpListenerWrapper> listenerFactory = null, ILogger logger = null)
+        public EchoServer(int port, Func<IPAddress, int, ITcpListenerWrapper>? listenerFactory = null, ILogger? logger = null)
         {
             _port = port;
             _listenerFactory = listenerFactory ?? ((addr, p) => new TcpListenerWrapper(addr, p));
@@ -119,7 +155,7 @@ namespace EchoServer
                     ITcpClientWrapper client = await _listener.AcceptTcpClientAsync();
                     _logger.Log("Client connected.");
 
-                    _ = Task.Run(() => HandleClientAsync(client, _cancellationTokenSource.Token));
+                    _ = Task.Run(async () => await HandleClientAsync(client, _cancellationTokenSource.Token));
                 }
                 catch (ObjectDisposedException)
                 {
@@ -146,7 +182,7 @@ namespace EchoServer
                         _logger.Log($"Echoed {bytesRead} bytes to the client.");
                     }
                 }
-                catch (Exception ex) when (!(ex is OperationCanceledException))
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     _logger.Log($"Error: {ex.Message}");
                 }
@@ -162,8 +198,26 @@ namespace EchoServer
         {
             _cancellationTokenSource.Cancel();
             _listener?.Stop();
-            _cancellationTokenSource.Dispose();
             _logger.Log("Server stopped.");
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    Stop();
+                    _cancellationTokenSource?.Dispose();
+                }
+                _disposed = true;
+            }
         }
     }
 
@@ -184,9 +238,10 @@ namespace EchoServer
         int Send(byte[] data, int length, IPEndPoint endpoint);
     }
 
-    public class UdpClientWrapper : IUdpClientWrapper
+    public sealed class UdpClientWrapper : IUdpClientWrapper
     {
         private readonly UdpClient _client;
+        private bool _disposed;
 
         public UdpClientWrapper()
         {
@@ -198,19 +253,36 @@ namespace EchoServer
             return _client.Send(data, length, endpoint);
         }
 
-        public void Dispose() => _client.Dispose();
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    _client?.Dispose();
+                }
+                _disposed = true;
+            }
+        }
     }
 
-    public class UdpTimedSender : IDisposable
+    public sealed class UdpTimedSender : IDisposable
     {
         private readonly string _host;
         private readonly int _port;
         private readonly IUdpClientWrapper _udpClient;
         private readonly ILogger _logger;
-        private Timer _timer;
+        private Timer? _timer;
         private ushort _counter = 0;
+        private bool _disposed;
 
-        public UdpTimedSender(string host, int port, IUdpClientWrapper udpClient = null, ILogger logger = null)
+        public UdpTimedSender(string host, int port, IUdpClientWrapper? udpClient = null, ILogger? logger = null)
         {
             _host = host;
             _port = port;
@@ -226,7 +298,7 @@ namespace EchoServer
             _timer = new Timer(SendMessageCallback, null, 0, intervalMilliseconds);
         }
 
-        private void SendMessageCallback(object state)
+        private void SendMessageCallback(object? state)
         {
             try
             {
@@ -268,19 +340,32 @@ namespace EchoServer
 
         public void Dispose()
         {
-            StopSending();
-            _udpClient?.Dispose();
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    StopSending();
+                    _udpClient?.Dispose();
+                }
+                _disposed = true;
+            }
         }
     }
 
     // Program class для запуску
-    public class Program
+    public static class Program
     {
         public static async Task Main(string[] args)
         {
-            EchoServer server = new EchoServer(5000);
+            using var server = new EchoServer(5000);
 
-            _ = Task.Run(() => server.StartAsync());
+            _ = Task.Run(async () => await server.StartAsync());
 
             string host = "127.0.0.1";
             int port = 60000;
@@ -298,7 +383,6 @@ namespace EchoServer
                 }
 
                 sender.StopSending();
-                server.Stop();
                 Console.WriteLine("Sender stopped.");
             }
         }
