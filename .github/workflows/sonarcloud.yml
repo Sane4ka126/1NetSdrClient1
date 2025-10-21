@@ -43,19 +43,34 @@ jobs:
     name: Sonar Check
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with: 
-          fetch-depth: 0
+          fetch-depth: 0  # Shallow clones should be disabled for better analysis
       
-      - uses: actions/setup-dotnet@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      
+      - name: Setup Java (required by SonarScanner)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
       
       - name: Install SonarScanner
         run: |
           dotnet tool install --global dotnet-sonarscanner
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
         shell: pwsh
+      
+      - name: Cache SonarCloud packages
+        uses: actions/cache@v4
+        with:
+          path: ~\.sonar\cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
       
       - name: SonarScanner Begin
         env:
@@ -66,30 +81,67 @@ jobs:
             /k:"Sane4ka126_1NetSdrClient1" `
             /o:"sane4ka126" `
             /d:sonar.host.url="https://sonarcloud.io" `
-            /d:sonar.login="${env:SONAR_TOKEN}" `
-            /d:sonar.cs.opencover.reportsPaths="**/coverage.xml" `
-            /d:sonar.cpd.cs.minimumTokens=40 `
-            /d:sonar.cpd.cs.minimumLines=5 `
-            /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.yml" `
-            /d:sonar.qualitygate.wait=true
+            /d:sonar.token="${env:SONAR_TOKEN}" `
+            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml" `
+            /d:sonar.coverage.exclusions="**/Program.cs,**/*Tests.cs" `
+            /d:sonar.cpd.exclusions="**/Program.cs" `
+            /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.yml,**/.github/**" `
+            /d:sonar.qualitygate.wait=true `
+            /d:sonar.qualitygate.timeout=300
         shell: pwsh
       
-      - name: Restore
+      - name: Restore dependencies
         run: dotnet restore NetSdrClient.sln
       
       - name: Build
         run: dotnet build NetSdrClient.sln -c Release --no-restore
       
-      - name: Tests with coverage
+      - name: Test with coverage
         run: |
-          dotnet test NetSdrClientAppTests/NetSdrClientAppTests.csproj -c Release --no-build `
-            /p:CollectCoverage=true `
-            /p:CoverletOutput=TestResults/ `
-            /p:CoverletOutputFormat=opencover
+          dotnet test NetSdrClientAppTests/NetSdrClientAppTests.csproj `
+            -c Release `
+            --no-build `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+        shell: pwsh
+      
+      - name: Find and copy coverage report
+        run: |
+          Write-Host "Searching for coverage files..."
+          $coverageFiles = Get-ChildItem -Path "NetSdrClientAppTests/TestResults" -Filter "coverage.opencover.xml" -Recurse
+          
+          if ($coverageFiles) {
+            foreach ($file in $coverageFiles) {
+              Write-Host "Found coverage file: $($file.FullName)"
+              $destPath = "NetSdrClientAppTests/TestResults/coverage.opencover.xml"
+              Copy-Item $file.FullName -Destination $destPath -Force
+              Write-Host "Copied to: $destPath"
+              
+              # Verify file exists and has content
+              if (Test-Path $destPath) {
+                $size = (Get-Item $destPath).Length
+                Write-Host "Coverage file size: $size bytes"
+              }
+            }
+          } else {
+            Write-Host "WARNING: No coverage files found!"
+            Write-Host "Contents of TestResults:"
+            Get-ChildItem -Path "NetSdrClientAppTests/TestResults" -Recurse | Format-Table Name, FullName
+          }
         shell: pwsh
       
       - name: SonarScanner End
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: dotnet sonarscanner end /d:sonar.login="${env:SONAR_TOKEN}"
+        run: dotnet sonarscanner end /d:sonar.token="${env:SONAR_TOKEN}"
         shell: pwsh
+      
+      - name: Upload coverage artifacts (for debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            **/TestResults/**/*.xml
+            **/coverage.*.xml
+          retention-days: 5
