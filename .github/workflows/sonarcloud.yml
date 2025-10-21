@@ -36,7 +36,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  pull-requests: read # allows SonarCloud to decorate PRs with analysis results
+  pull-requests: read
 
 jobs:
   sonar-check:
@@ -44,46 +44,52 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-
+        with: 
+          fetch-depth: 0
+      
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-
-      # 1) BEGIN: SonarScanner for .NET
-      - name: SonarScanner Begin
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      
+      - name: Install SonarScanner
         run: |
           dotnet tool install --global dotnet-sonarscanner
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
+        shell: pwsh
+      
+      - name: SonarScanner Begin
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           dotnet sonarscanner begin `
             /k:"Sane4ka126_1NetSdrClient1" `
             /o:"sane4ka126" `
-            /d:sonar.token=$env:SONAR_TOKEN `
+            /d:sonar.host.url="https://sonarcloud.io" `
+            /d:sonar.login="${env:SONAR_TOKEN}" `
             /d:sonar.cs.opencover.reportsPaths="**/coverage.xml" `
             /d:sonar.cpd.cs.minimumTokens=40 `
             /d:sonar.cpd.cs.minimumLines=5 `
-            /d:sonar.exclusions=**/bin/**,**/obj/**,**/sonarcloud.yml `
+            /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.yml" `
             /d:sonar.qualitygate.wait=true
         shell: pwsh
-
-      # 2) BUILD & TEST
+      
       - name: Restore
         run: dotnet restore NetSdrClient.sln
+      
       - name: Build
         run: dotnet build NetSdrClient.sln -c Release --no-restore
-      - name: Tests with coverage (OpenCover)
+      
+      - name: Tests with coverage
         run: |
           dotnet test NetSdrClientAppTests/NetSdrClientAppTests.csproj -c Release --no-build `
             /p:CollectCoverage=true `
-            /p:CoverletOutput=TestResults/coverage.xml `
+            /p:CoverletOutput=TestResults/ `
             /p:CoverletOutputFormat=opencover
         shell: pwsh
-
-      # 3) END: SonarScanner
+      
       - name: SonarScanner End
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: dotnet sonarscanner end /d:sonar.token=$env:SONAR_TOKEN
+        run: dotnet sonarscanner end /d:sonar.login="${env:SONAR_TOKEN}"
         shell: pwsh
