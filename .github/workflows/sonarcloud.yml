@@ -25,6 +25,8 @@
 
 # Feel free to take a look at our documentation (https://docs.sonarcloud.io/getting-started/github/)
 # or reach out to our community forum if you need some help (https://community.sonarsource.com/c/help/sc/9)
+
+
 name: SonarCloud analysis
 
 on:
@@ -35,113 +37,48 @@ on:
   workflow_dispatch:
 
 permissions:
-  pull-requests: read
+  pull-requests: read # allows SonarCloud to decorate PRs with analysis results
 
 jobs:
   sonar-check:
     name: Sonar Check
-    runs-on: windows-latest
-    
+    runs-on: windows-latest   # безпечно для будь-яких .NET проектів
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with: 
-          fetch-depth: 0
-      
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-      
-      - name: Install and Fix SonarScanner
-        run: |
-          Write-Host "Uninstalling old version..." -ForegroundColor Yellow
-          dotnet tool uninstall --global dotnet-sonarscanner 2>$null
-          
-          Write-Host "Cleaning directories..." -ForegroundColor Yellow
-          Remove-Item -Path "$env:USERPROFILE\.dotnet\tools\.store\dotnet-sonarscanner" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "$env:USERPROFILE\.sonar" -Recurse -Force -ErrorAction SilentlyContinue
-          
-          Write-Host "Installing SonarScanner..." -ForegroundColor Green
-          dotnet tool install --global dotnet-sonarscanner
-          
-          Write-Host "Creating clean config..." -ForegroundColor Cyan
-          $configPath = "$env:USERPROFILE\.dotnet\tools\.store\dotnet-sonarscanner\11.0.0\dotnet-sonarscanner\11.0.0\tools\netcoreapp3.1\any\SonarQube.Analysis.xml"
-          $configContent = @"
-<?xml version="1.0" encoding="utf-8"?>
-<SonarQubeAnalysisProperties xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns="http://www.sonarsource.com/msbuild/integration/2015/1">
-</SonarQubeAnalysisProperties>
-"@
-          if (Test-Path $configPath) {
-            Set-Content -Path $configPath -Value $configContent -Force
-            Write-Host "✓ Config fixed!" -ForegroundColor Green
-          }
-        shell: pwsh
-      
-      - name: Install Coverlet
-        run: dotnet add NetSdrClientAppTests/NetSdrClientAppTests.csproj package coverlet.msbuild
-      
-      - name: Restore dependencies
-        run: dotnet restore NetSdrClient.sln
-      
+
+      # 1) BEGIN: SonarScanner for .NET
       - name: SonarScanner Begin
         run: |
+          dotnet tool install --global dotnet-sonarscanner
+          echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
           dotnet sonarscanner begin `
-            /k:"Sane4ka126_1NetSdrClient1" `
-            /o:"sane4ka126" `
-            /d:sonar.host.url="https://sonarcloud.io" `
-            /d:sonar.token="${{ secrets.SONAR_TOKEN }}" `
-            /d:sonar.cs.opencover.reportsPaths="coverage.opencover.xml" `
-            /d:sonar.coverage.exclusions="**/Program.cs,**/*Tests.cs" `
-            /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.yml" `
-            /d:sonar.qualitygate.wait=true
+          /k:"Sane4ka126_1NetSdrClient1" `
+          /o:"sane4ka126" `
+          /d:sonar.token="${{ secrets.SONAR_TOKEN }}" `
+          /d:sonar.cs.opencover.reportsPaths="**/coverage.xml" `
+          /d:sonar.cpd.cs.minimumTokens=40 `
+          /d:sonar.cpd.cs.minimumLines=5 `
+          /d:sonar.exclusions=**/bin/**,**/obj/**,**/sonarcloud.yml `
+          /d:sonar.qualitygate.wait=true
         shell: pwsh
-      
+      # 2) BUILD & TEST
+      - name: Restore
+        run: dotnet restore NetSdrClient.sln
       - name: Build
         run: dotnet build NetSdrClient.sln -c Release --no-restore
-      
-      - name: Test with Coverlet
+      - name: Tests with coverage (OpenCover)
         run: |
-          Write-Host "=== Running tests with Coverlet ===" -ForegroundColor Cyan
-          dotnet test NetSdrClientAppTests/NetSdrClientAppTests.csproj `
-            -c Release `
-            --no-build `
+          dotnet test NetSdrClientAppTests/NetSdrClientAppTests.csproj -c Release --no-build `
             /p:CollectCoverage=true `
-            /p:CoverletOutputFormat=opencover `
-            /p:CoverletOutput="../coverage.opencover.xml" `
-            /p:ExcludeByFile="**/Program.cs"
-          
-          if (Test-Path "coverage.opencover.xml") {
-            $size = [math]::Round((Get-Item "coverage.opencover.xml").Length / 1KB, 2)
-            Write-Host "`n✓ Coverage file created: coverage.opencover.xml ($size KB)" -ForegroundColor Green
-            
-            $xml = [xml](Get-Content "coverage.opencover.xml")
-            $summary = $xml.CoverageSession.Summary
-            if ($summary) {
-              Write-Host "`n=== Coverage Summary ===" -ForegroundColor Cyan
-              Write-Host "Line Coverage: $($summary.lineCoverage)%" -ForegroundColor White
-              Write-Host "Branch Coverage: $($summary.branchCoverage)%" -ForegroundColor White
-            }
-          } else {
-            Write-Host "`n✗ Coverage file not created!" -ForegroundColor Red
-            exit 1
-          }
+            /p:CoverletOutput=TestResults/coverage.xml `
+            /p:CoverletOutputFormat=opencover
         shell: pwsh
-      
+      # 3) END: SonarScanner
       - name: SonarScanner End
         run: dotnet sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
         shell: pwsh
-      
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage.opencover.xml
-          retention-days: 5
