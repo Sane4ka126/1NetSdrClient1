@@ -84,17 +84,16 @@ namespace EchoServer.Services
                 {
                     if (_isRunning)
                     {
-                        _timer?.Dispose();
                         _isRunning = false;
                     }
+                    
+                    _timer?.Dispose();
+                    _udpClient?.Dispose();
                 }
                 catch
                 {
                     // Ігноруємо помилки при зупинці
                 }
-
-                _udpClient?.Dispose();
-                _timer?.Dispose();
             }
 
             _udpClient = null;
