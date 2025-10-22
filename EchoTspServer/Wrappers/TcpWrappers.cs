@@ -1,77 +1,72 @@
+using System;
 using System.Net;
-using System.Net.Sockets;
 using System.Threading;
-using System.Threading.Tasks;
 using EchoServer.Interfaces;
 
-namespace EchoServer.Wrappers
+namespace EchoServer
 {
-    public class NetworkStreamWrapper : INetworkStream
+    public class UdpTimedSender : IDisposable
     {
-        private readonly NetworkStream _stream;
+        private readonly string _host;
+        private readonly int _port;
+        private readonly IUdpClient _udpClient;
+        private readonly IMessageGenerator _messageGenerator;
+        private readonly ILogger _logger;
+        private Timer? _timer;
+        private ushort _sequenceNumber = 0;
 
-        public NetworkStreamWrapper(NetworkStream stream)
+        public bool IsRunning => _timer != null;
+        public ushort CurrentSequenceNumber => _sequenceNumber;
+
+        public UdpTimedSender(
+            string host, 
+            int port, 
+            IUdpClient udpClient, 
+            IMessageGenerator messageGenerator,
+            ILogger logger)
         {
-            _stream = stream;
+            _host = host ?? throw new ArgumentNullException(nameof(host));
+            _port = port;
+            _udpClient = udpClient ?? throw new ArgumentNullException(nameof(udpClient));
+            _messageGenerator = messageGenerator ?? throw new ArgumentNullException(nameof(messageGenerator));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token)
+        public void StartSending(int intervalMilliseconds)
         {
-            return _stream.ReadAsync(buffer, offset, count, token);
+            if (_timer != null)
+                throw new InvalidOperationException("Sender is already running.");
+
+            _timer = new Timer(SendMessageCallback, null, 0, intervalMilliseconds);
         }
 
-        public Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken token)
+        private void SendMessageCallback(object state)
         {
-            return _stream.WriteAsync(buffer, offset, count, token);
-        }
-    }
+            try
+            {
+                _sequenceNumber++;
+                byte[] msg = _messageGenerator.GenerateMessage(_sequenceNumber);
+                var endpoint = new IPEndPoint(IPAddress.Parse(_host), _port);
 
-    public class TcpClientWrapper : ITcpClient
-    {
-        private readonly TcpClient _client;
-        private INetworkStream _streamWrapper;
-
-        public TcpClientWrapper(TcpClient client)
-        {
-            _client = client;
-        }
-
-        public INetworkStream GetStream()
-        {
-            return _streamWrapper ??= new NetworkStreamWrapper(_client.GetStream());
+                _udpClient.Send(msg, msg.Length, endpoint);
+                _logger.Log($"Message sent to {_host}:{_port}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error sending message: {ex.Message}");
+            }
         }
 
-        public void Close()
+        public void StopSending()
         {
-            _client.Close();
-        }
-    }
-
-    public class TcpListenerWrapper : ITcpListener
-    {
-        private readonly TcpListener _listener;
-
-        public TcpListenerWrapper(TcpListener listener)
-        {
-            _listener = listener;
+            _timer?.Dispose();
+            _timer = null;
         }
 
-        public void Start() => _listener.Start();
-        public void Stop() => _listener.Stop();
-
-        public async Task<ITcpClient> AcceptTcpClientAsync()
+        public void Dispose()
         {
-            var client = await _listener.AcceptTcpClientAsync();
-            return new TcpClientWrapper(client);
-        }
-    }
-
-    public class TcpListenerFactory : ITcpListenerFactory
-    {
-        public ITcpListener CreateListener(int port)
-        {
-            var listener = new TcpListener(IPAddress.Any, port);
-            return new TcpListenerWrapper(listener);
+            StopSending();
+            _udpClient.Dispose();
         }
     }
 }
