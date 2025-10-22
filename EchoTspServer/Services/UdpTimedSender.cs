@@ -10,15 +10,14 @@ namespace EchoServer.Services
         private readonly ILogger _logger;
         private readonly string _host;
         private readonly int _port;
-        private UdpClient _udpClient;
-        private Timer _timer;
+        private UdpClient? _udpClient;
+        private Timer? _timer;
         private bool _isRunning;
         private bool _disposed;
 
         public UdpTimedSender(string host, int port, ILogger logger)
         {
-            if (logger == null)
-                throw new ArgumentNullException(nameof(logger));
+            ArgumentNullException.ThrowIfNull(logger);
 
             _host = host;
             _port = port;
@@ -28,15 +27,14 @@ namespace EchoServer.Services
 
         public void StartSending(int intervalMs)
         {
-            if (_disposed)
-                throw new ObjectDisposedException(nameof(UdpTimedSender));
+            ObjectDisposedException.ThrowIf(_disposed, this);
 
             if (_isRunning)
                 throw new InvalidOperationException("Sender is already running.");
 
             _isRunning = true;
-
             var random = new Random();
+
             _timer = new Timer(state =>
             {
                 if (_disposed) return;
@@ -45,7 +43,7 @@ namespace EchoServer.Services
                 {
                     byte[] data = new byte[100];
                     random.NextBytes(data);
-                    _udpClient.Send(data, data.Length, _host, _port);
+                    _udpClient?.Send(data, data.Length, _host, _port);
                     _logger.Log($"UDP data sent to {_host}:{_port}");
                 }
                 catch (Exception ex)
@@ -71,26 +69,37 @@ namespace EchoServer.Services
 
         public void Dispose()
         {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
             if (_disposed)
                 return;
 
-            _disposed = true;
-
-            try
+            if (disposing)
             {
-                if (_isRunning)
+                try
                 {
-                    _timer?.Dispose();
-                    _isRunning = false;
+                    if (_isRunning)
+                    {
+                        _timer?.Dispose();
+                        _isRunning = false;
+                    }
                 }
-            }
-            catch
-            {
-                // Ігноруємо помилки при зупинці
+                catch
+                {
+                    // Ігноруємо помилки при зупинці
+                }
+
+                _udpClient?.Dispose();
+                _timer?.Dispose();
             }
 
-            _udpClient?.Dispose();
             _udpClient = null;
+            _timer = null;
+            _disposed = true;
         }
     }
 }
