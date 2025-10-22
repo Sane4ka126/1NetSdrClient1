@@ -39,18 +39,23 @@ namespace NetSdrClientAppTests
             byte[] echoedData = null;
 
             // Симулюємо читання: спочатку повертаємо 5 байт, потім 0 (кінець стріму)
+            var readCount = 0;
             mockStream
-                .SetupSequence(s => s.ReadAsync(
+                .Setup(s => s.ReadAsync(
                     It.IsAny<byte[]>(), 
                     It.IsAny<int>(), 
                     It.IsAny<int>(), 
                     It.IsAny<CancellationToken>()))
-                .Returns((byte[] buffer, int offset, int count, CancellationToken token) =>
+                .ReturnsAsync((byte[] buffer, int offset, int count, CancellationToken token) =>
                 {
-                    Array.Copy(receivedData, 0, buffer, offset, receivedData.Length);
-                    return Task.FromResult(receivedData.Length);
-                })
-                .ReturnsAsync(0);
+                    if (readCount == 0)
+                    {
+                        Array.Copy(receivedData, 0, buffer, offset, receivedData.Length);
+                        readCount++;
+                        return receivedData.Length;
+                    }
+                    return 0;
+                });
 
             // Перехоплюємо записані дані
             mockStream
@@ -153,23 +158,29 @@ namespace NetSdrClientAppTests
             byte[] message1 = new byte[] { 1, 2, 3 };
             byte[] message2 = new byte[] { 4, 5, 6, 7 };
 
+            var readCount = 0;
             mockStream
-                .SetupSequence(s => s.ReadAsync(
+                .Setup(s => s.ReadAsync(
                     It.IsAny<byte[]>(), 
                     It.IsAny<int>(), 
                     It.IsAny<int>(), 
                     It.IsAny<CancellationToken>()))
-                .Returns((byte[] buffer, int offset, int count, CancellationToken token) =>
+                .ReturnsAsync((byte[] buffer, int offset, int count, CancellationToken token) =>
                 {
-                    Array.Copy(message1, 0, buffer, offset, message1.Length);
-                    return Task.FromResult(message1.Length);
-                })
-                .Returns((byte[] buffer, int offset, int count, CancellationToken token) =>
-                {
-                    Array.Copy(message2, 0, buffer, offset, message2.Length);
-                    return Task.FromResult(message2.Length);
-                })
-                .ReturnsAsync(0);
+                    if (readCount == 0)
+                    {
+                        Array.Copy(message1, 0, buffer, offset, message1.Length);
+                        readCount++;
+                        return message1.Length;
+                    }
+                    else if (readCount == 1)
+                    {
+                        Array.Copy(message2, 0, buffer, offset, message2.Length);
+                        readCount++;
+                        return message2.Length;
+                    }
+                    return 0;
+                });
 
             int writeCount = 0;
             mockStream
