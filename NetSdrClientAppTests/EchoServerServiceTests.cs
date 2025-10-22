@@ -323,17 +323,25 @@ namespace NetSdrClientAppTests
         public async Task StartAsync_ShouldStartListening()
         {
             // Arrange
-            var cts = new CancellationTokenSource();
-            
             _mockListener
-                .Setup(l => l.AcceptTcpClientAsync(It.IsAny<CancellationToken>()))
+                .Setup(l => l.AcceptTcpClientAsync())
                 .ThrowsAsync(new OperationCanceledException());
 
             var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
 
             // Act
-            cts.Cancel();
-            await server.StartAsync(cts.Token);
+            var startTask = Task.Run(async () => await server.StartAsync());
+            await Task.Delay(50);
+            server.Stop();
+            
+            try
+            {
+                await startTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected
+            }
 
             // Assert
             _mockListener.Verify(l => l.Start(), Times.Once);
@@ -344,7 +352,6 @@ namespace NetSdrClientAppTests
         public async Task StartAsync_ShouldAcceptMultipleClients()
         {
             // Arrange
-            var cts = new CancellationTokenSource();
             var mockClient1 = new Mock<ITcpClientWrapper>();
             var mockClient2 = new Mock<ITcpClientWrapper>();
             var mockStream = new Mock<INetworkStreamWrapper>();
@@ -362,19 +369,19 @@ namespace NetSdrClientAppTests
 
             var acceptCount = 0;
             _mockListener
-                .Setup(l => l.AcceptTcpClientAsync(It.IsAny<CancellationToken>()))
-                .Returns<CancellationToken>(async token =>
+                .Setup(l => l.AcceptTcpClientAsync())
+                .Returns(async () =>
                 {
                     if (acceptCount == 0)
                     {
                         acceptCount++;
-                        await Task.Delay(10, token);
+                        await Task.Delay(10);
                         return mockClient1.Object;
                     }
                     else if (acceptCount == 1)
                     {
                         acceptCount++;
-                        await Task.Delay(10, token);
+                        await Task.Delay(10);
                         return mockClient2.Object;
                     }
                     throw new OperationCanceledException();
@@ -383,9 +390,9 @@ namespace NetSdrClientAppTests
             var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
 
             // Act
-            var startTask = server.StartAsync(cts.Token);
-            await Task.Delay(100);
-            cts.Cancel();
+            var startTask = Task.Run(async () => await server.StartAsync());
+            await Task.Delay(150);
+            server.Stop();
             
             try
             {
@@ -404,22 +411,22 @@ namespace NetSdrClientAppTests
         public async Task StartAsync_ShouldHandleAcceptException()
         {
             // Arrange
-            var cts = new CancellationTokenSource();
-
             _mockListener
-                .Setup(l => l.AcceptTcpClientAsync(It.IsAny<CancellationToken>()))
+                .Setup(l => l.AcceptTcpClientAsync())
                 .ThrowsAsync(new Exception("Accept failed"));
 
             var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
 
             // Act
-            cts.CancelAfter(100);
-            
+            var startTask = Task.Run(async () => await server.StartAsync());
+            await Task.Delay(100);
+            server.Stop();
+
             try
             {
-                await server.StartAsync(cts.Token);
+                await startTask;
             }
-            catch (OperationCanceledException)
+            catch
             {
                 // Expected
             }
