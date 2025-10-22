@@ -1,49 +1,72 @@
 using System;
-using System.Linq;
 using System.Net;
-using System.Net.Sockets;
+using System.Threading;
 using EchoServer.Interfaces;
 
-namespace EchoServer.Wrappers
+namespace EchoServer
 {
-    public class UdpClientWrapper : IUdpClient
+    public class UdpTimedSender : IDisposable
     {
-        private readonly UdpClient _client;
+        private readonly string _host;
+        private readonly int _port;
+        private readonly IUdpClient _udpClient;
+        private readonly IMessageGenerator _messageGenerator;
+        private readonly ILogger _logger;
+        private Timer? _timer;
+        private ushort _sequenceNumber = 0;
 
-        public UdpClientWrapper()
+        public bool IsRunning => _timer != null;
+        public ushort CurrentSequenceNumber => _sequenceNumber;
+
+        public UdpTimedSender(
+            string host, 
+            int port, 
+            IUdpClient udpClient, 
+            IMessageGenerator messageGenerator,
+            ILogger logger)
         {
-            _client = new UdpClient();
+            _host = host ?? throw new ArgumentNullException(nameof(host));
+            _port = port;
+            _udpClient = udpClient ?? throw new ArgumentNullException(nameof(udpClient));
+            _messageGenerator = messageGenerator ?? throw new ArgumentNullException(nameof(messageGenerator));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public void Send(byte[] data, int length, IPEndPoint endpoint)
+        public void StartSending(int intervalMilliseconds)
         {
-            _client.Send(data, length, endpoint);
+            if (_timer != null)
+                throw new InvalidOperationException("Sender is already running.");
+
+            _timer = new Timer(SendMessageCallback, null, 0, intervalMilliseconds);
+        }
+
+        private void SendMessageCallback(object state)
+        {
+            try
+            {
+                _sequenceNumber++;
+                byte[] msg = _messageGenerator.GenerateMessage(_sequenceNumber);
+                var endpoint = new IPEndPoint(IPAddress.Parse(_host), _port);
+
+                _udpClient.Send(msg, msg.Length, endpoint);
+                _logger.Log($"Message sent to {_host}:{_port}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error sending message: {ex.Message}");
+            }
+        }
+
+        public void StopSending()
+        {
+            _timer?.Dispose();
+            _timer = null;
         }
 
         public void Dispose()
         {
-            _client?.Dispose();
-        }
-    }
-
-    public class RandomMessageGenerator : IMessageGenerator
-    {
-        private readonly Random _random;
-
-        public RandomMessageGenerator()
-        {
-            _random = new Random();
-        }
-
-        public byte[] GenerateMessage(ushort sequenceNumber)
-        {
-            byte[] samples = new byte[1024];
-            _random.NextBytes(samples);
-
-            return new byte[] { 0x04, 0x84 }
-                .Concat(BitConverter.GetBytes(sequenceNumber))
-                .Concat(samples)
-                .ToArray();
+            StopSending();
+            _udpClient.Dispose();
         }
     }
 }
