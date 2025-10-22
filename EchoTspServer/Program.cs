@@ -1,152 +1,194 @@
 using System;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace NetSdrClientApp.Networking
+namespace EchoServer
 {
-    public interface ILogger
+    // Інтерфейс для покращення тестованості
+    public interface INetworkStreamWrapper
     {
-        void LogInfo(string message);
-        void LogError(string message);
+        Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token);
+        Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken token);
+        void Close();
     }
 
-    public class ConsoleLogger : ILogger
+    public class NetworkStreamWrapper : INetworkStreamWrapper
     {
-        public void LogInfo(string message) => Console.WriteLine(message);
-        public void LogError(string message) => Console.WriteLine($"Error: {message}");
+        private readonly NetworkStream _stream;
+
+        public NetworkStreamWrapper(NetworkStream stream)
+        {
+            _stream = stream;
+        }
+
+        public Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token)
+        {
+            return _stream.ReadAsync(buffer, offset, count, token);
+        }
+
+        public Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken token)
+        {
+            return _stream.WriteAsync(buffer, offset, count, token);
+        }
+
+        public void Close()
+        {
+            _stream.Close();
+        }
     }
 
-    public class NullLogger : ILogger
+    public interface ITcpClientWrapper
     {
-        public void LogInfo(string message) { }
-        public void LogError(string message) { }
+        INetworkStreamWrapper GetStream();
+        void Close();
     }
 
-    public interface ITcpListener : IDisposable
+    public class TcpClientWrapper : ITcpClientWrapper
+    {
+        private readonly TcpClient _client;
+
+        public TcpClientWrapper(TcpClient client)
+        {
+            _client = client;
+        }
+
+        public INetworkStreamWrapper GetStream()
+        {
+            return new NetworkStreamWrapper(_client.GetStream());
+        }
+
+        public void Close()
+        {
+            _client.Close();
+        }
+    }
+
+    public interface ITcpListenerWrapper
     {
         void Start();
-        Task<TcpClient> AcceptTcpClientAsync();
         void Stop();
-        IPEndPoint LocalEndpoint { get; }
+        Task<ITcpClientWrapper> AcceptTcpClientAsync();
     }
 
-    public class TcpListenerWrapper : ITcpListener
+    public class TcpListenerWrapper : ITcpListenerWrapper
     {
         private readonly TcpListener _listener;
+
         public TcpListenerWrapper(IPAddress address, int port)
         {
             _listener = new TcpListener(address, port);
         }
-        public void Start() => _listener.Start();
-        public Task<TcpClient> AcceptTcpClientAsync() => _listener.AcceptTcpClientAsync();
-        public void Stop() => _listener.Stop();
-        public IPEndPoint LocalEndpoint => (IPEndPoint)_listener.LocalEndpoint;
-        public void Dispose() => _listener.Stop();
+
+        public void Start()
+        {
+            _listener.Start();
+        }
+
+        public void Stop()
+        {
+            _listener.Stop();
+        }
+
+        public async Task<ITcpClientWrapper> AcceptTcpClientAsync()
+        {
+            var client = await _listener.AcceptTcpClientAsync();
+            return new TcpClientWrapper(client);
+        }
     }
 
-    public interface ITcpClient : IDisposable
+    public interface ILogger
     {
-        NetworkStream GetStream();
+        void Log(string message);
     }
 
-    public class TcpClientWrapper : ITcpClient
+    public class ConsoleLogger : ILogger
     {
-        private readonly TcpClient _client;
-        public TcpClientWrapper(TcpClient client) => _client = client;
-        public NetworkStream GetStream() => _client.GetStream();
-        public void Dispose() => _client.Dispose();
+        public void Log(string message)
+        {
+            Console.WriteLine(message);
+        }
     }
 
     public class EchoServer
     {
         private readonly int _port;
-        private readonly ITcpListener _listener;
-        private readonly CancellationTokenSource _cancellationTokenSource;
         private readonly ILogger _logger;
-        private Task _serverTask;
-        private int _actualPort;
-        public int ActualPort => _actualPort;
-        public bool IsRunning => _serverTask != null && !_serverTask.IsCompleted;
-        public int ActiveConnections { get; private set; }
+        private readonly Func<IPAddress, int, ITcpListenerWrapper> _listenerFactory;
+        private ITcpListenerWrapper _listener;
+        private CancellationTokenSource _cancellationTokenSource;
+        private const int BufferSize = 8192;
 
-        public EchoServer(int port, ILogger logger = null, ITcpListener listener = null)
+        // Конструктор з dependency injection
+        public EchoServer(int port, ILogger logger = null, 
+            Func<IPAddress, int, ITcpListenerWrapper> listenerFactory = null)
         {
+            if (port <= 0 || port > 65535)
+                throw new ArgumentOutOfRangeException(nameof(port), "Port must be between 1 and 65535");
+
             _port = port;
-            _logger = logger ?? new NullLogger();
-            _listener = listener ?? new TcpListenerWrapper(IPAddress.Any, port);
+            _logger = logger ?? new ConsoleLogger();
+            _listenerFactory = listenerFactory ?? ((addr, p) => new TcpListenerWrapper(addr, p));
             _cancellationTokenSource = new CancellationTokenSource();
         }
 
         public async Task StartAsync()
         {
+            _listener = _listenerFactory(IPAddress.Any, _port);
             _listener.Start();
-            _actualPort = ((IPEndPoint)_listener.LocalEndpoint).Port;
-            _logger.LogInfo($"Server started on port {_actualPort}.");
+            _logger.Log($"Server started on port {_port}.");
 
             while (!_cancellationTokenSource.Token.IsCancellationRequested)
             {
                 try
                 {
-                    TcpClient client = await _listener.AcceptTcpClientAsync();
-                    _logger.LogInfo("Client connected.");
-                    Interlocked.Increment(ref ActiveConnections);
+                    ITcpClientWrapper client = await _listener.AcceptTcpClientAsync();
+                    _logger.Log("Client connected.");
 
-                    _ = Task.Run(() => HandleClientAsync(new TcpClientWrapper(client), _cancellationTokenSource.Token));
+                    _ = Task.Run(() => HandleClientAsync(client, _cancellationTokenSource.Token));
                 }
                 catch (ObjectDisposedException)
                 {
+                    // Listener has been closed
                     break;
                 }
                 catch (Exception ex)
                 {
-                    if (!_cancellationTokenSource.Token.IsCancellationRequested)
-                    {
-                        _logger.LogError($"Accept error: {ex.Message}");
-                    }
+                    _logger.Log($"Error accepting client: {ex.Message}");
                     break;
                 }
             }
 
-            _logger.LogInfo("Server shutdown.");
+            _logger.Log("Server shutdown.");
         }
 
-        public void Start()
+        internal async Task HandleClientAsync(ITcpClientWrapper client, CancellationToken token)
         {
-            if (_serverTask != null)
-                throw new InvalidOperationException("Server is already running.");
-
-            _serverTask = Task.Run(() => StartAsync());
-        }
-
-        private async Task HandleClientAsync(ITcpClient client, CancellationToken token)
-        {
-            using (NetworkStream stream = client.GetStream())
+            INetworkStreamWrapper stream = null;
+            try
             {
-                try
-                {
-                    byte[] buffer = new byte[8192];
-                    int bytesRead;
+                stream = client.GetStream();
+                byte[] buffer = new byte[BufferSize];
+                int bytesRead;
 
-                    while (!token.IsCancellationRequested &&
-                           (bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
-                    {
-                        await stream.WriteAsync(buffer, 0, bytesRead, token);
-                        _logger.LogInfo($"Echoed {bytesRead} bytes to the client.");
-                    }
-                }
-                catch (Exception ex) when (!(ex is OperationCanceledException))
+                while (!token.IsCancellationRequested && 
+                       (bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
                 {
-                    _logger.LogError($"Client error: {ex.Message}");
+                    // Echo back the received message
+                    await stream.WriteAsync(buffer, 0, bytesRead, token);
+                    _logger.Log($"Echoed {bytesRead} bytes to the client.");
                 }
-                finally
-                {
-                    Interlocked.Decrement(ref ActiveConnections);
-                    client.Dispose();
-                    _logger.LogInfo("Client disconnected.");
-                }
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            {
+                _logger.Log($"Error: {ex.Message}");
+            }
+            finally
+            {
+                stream?.Close();
+                client.Close();
+                _logger.Log("Client disconnected.");
             }
         }
 
@@ -154,51 +196,96 @@ namespace NetSdrClientApp.Networking
         {
             _cancellationTokenSource.Cancel();
             _listener?.Stop();
-            _logger.LogInfo("Server stopped.");
+            _cancellationTokenSource.Dispose();
+            _logger.Log("Server stopped.");
         }
 
-        public async Task StopAsync(TimeSpan timeout = default)
+        public static async Task Main(string[] args)
         {
-            if (timeout == default)
-                timeout = TimeSpan.FromSeconds(5);
+            EchoServer server = new EchoServer(5000);
 
-            Stop();
+            // Start the server in a separate task
+            _ = Task.Run(() => server.StartAsync());
 
-            if (_serverTask != null)
+            string host = "127.0.0.1";
+            int port = 60000;
+            int intervalMilliseconds = 5000;
+
+            using (var sender = new UdpTimedSender(host, port))
             {
-                var completed = await Task.WhenAny(_serverTask, Task.Delay(timeout));
-                if (completed != _serverTask)
+                Console.WriteLine("Press any key to stop sending...");
+                sender.StartSending(intervalMilliseconds);
+
+                Console.WriteLine("Press 'q' to quit...");
+                while (Console.ReadKey(intercept: true).Key != ConsoleKey.Q)
                 {
-                    _logger.LogError("Server did not stop gracefully within timeout.");
+                    // Just wait until 'q' is pressed
                 }
-            }
 
-            _cancellationTokenSource?.Dispose();
+                sender.StopSending();
+                server.Stop();
+                Console.WriteLine("Sender stopped.");
+            }
         }
     }
 
-    public class ServerApplication
+    public class UdpTimedSender : IDisposable
     {
-        public static async Task RunAsync(string[] args)
+        private readonly string _host;
+        private readonly int _port;
+        private readonly UdpClient _udpClient;
+        private Timer _timer;
+        private ushort _sequenceNumber = 0;
+
+        public UdpTimedSender(string host, int port)
         {
-            var logger = new ConsoleLogger();
-            EchoServer server = new EchoServer(5000, logger);
-            server.Start();
-            await Task.Delay(500);
-
-            // Залишено місце для UdpTimedSender, якщо він буде доданий
-            logger.LogInfo("Press 'q' to quit...");
-            while (Console.ReadKey(intercept: true).Key != ConsoleKey.Q)
-            {
-            }
-
-            await server.StopAsync();
-            logger.LogInfo("Application stopped.");
+            _host = host;
+            _port = port;
+            _udpClient = new UdpClient();
         }
-    }
 
-    class Program
-    {
-        static Task Main(string[] args) => ServerApplication.RunAsync(args);
+        public void StartSending(int intervalMilliseconds)
+        {
+            if (_timer != null)
+                throw new InvalidOperationException("Sender is already running.");
+
+            _timer = new Timer(SendMessageCallback, null, 0, intervalMilliseconds);
+        }
+
+        private void SendMessageCallback(object state)
+        {
+            try
+            {
+                Random rnd = new Random();
+                byte[] samples = new byte[1024];
+                rnd.NextBytes(samples);
+                _sequenceNumber++;
+
+                byte[] msg = new byte[] { 0x04, 0x84 }
+                    .Concat(BitConverter.GetBytes(_sequenceNumber))
+                    .Concat(samples)
+                    .ToArray();
+                
+                var endpoint = new IPEndPoint(IPAddress.Parse(_host), _port);
+                _udpClient.Send(msg, msg.Length, endpoint);
+                Console.WriteLine($"Message sent to {_host}:{_port}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error sending message: {ex.Message}");
+            }
+        }
+
+        public void StopSending()
+        {
+            _timer?.Dispose();
+            _timer = null;
+        }
+
+        public void Dispose()
+        {
+            StopSending();
+            _udpClient.Dispose();
+        }
     }
 }
