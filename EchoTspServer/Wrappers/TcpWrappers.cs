@@ -1,72 +1,77 @@
-using System;
 using System.Net;
+using System.Net.Sockets;
 using System.Threading;
+using System.Threading.Tasks;
 using EchoServer.Interfaces;
 
-namespace EchoServer
+namespace EchoServer.Wrappers
 {
-    public class UdpTimedSender : IDisposable
+    public class NetworkStreamWrapper : INetworkStream
     {
-        private readonly string _host;
-        private readonly int _port;
-        private readonly IUdpClient _udpClient;
-        private readonly IMessageGenerator _messageGenerator;
-        private readonly ILogger _logger;
-        private Timer? _timer;
-        private ushort _sequenceNumber = 0;
+        private readonly NetworkStream _stream;
 
-        public bool IsRunning => _timer != null;
-        public ushort CurrentSequenceNumber => _sequenceNumber;
-
-        public UdpTimedSender(
-            string host, 
-            int port, 
-            IUdpClient udpClient, 
-            IMessageGenerator messageGenerator,
-            ILogger logger)
+        public NetworkStreamWrapper(NetworkStream stream)
         {
-            _host = host ?? throw new ArgumentNullException(nameof(host));
-            _port = port;
-            _udpClient = udpClient ?? throw new ArgumentNullException(nameof(udpClient));
-            _messageGenerator = messageGenerator ?? throw new ArgumentNullException(nameof(messageGenerator));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _stream = stream;
         }
 
-        public void StartSending(int intervalMilliseconds)
+        public Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token)
         {
-            if (_timer != null)
-                throw new InvalidOperationException("Sender is already running.");
-
-            _timer = new Timer(SendMessageCallback, null, 0, intervalMilliseconds);
+            return _stream.ReadAsync(buffer, offset, count, token);
         }
 
-        private void SendMessageCallback(object state)
+        public Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken token)
         {
-            try
-            {
-                _sequenceNumber++;
-                byte[] msg = _messageGenerator.GenerateMessage(_sequenceNumber);
-                var endpoint = new IPEndPoint(IPAddress.Parse(_host), _port);
+            return _stream.WriteAsync(buffer, offset, count, token);
+        }
+    }
 
-                _udpClient.Send(msg, msg.Length, endpoint);
-                _logger.Log($"Message sent to {_host}:{_port}");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error sending message: {ex.Message}");
-            }
+    public class TcpClientWrapper : ITcpClient
+    {
+        private readonly TcpClient _client;
+        private INetworkStream? _streamWrapper;
+
+        public TcpClientWrapper(TcpClient client)
+        {
+            _client = client;
         }
 
-        public void StopSending()
+        public INetworkStream GetStream()
         {
-            _timer?.Dispose();
-            _timer = null;
+            return _streamWrapper ??= new NetworkStreamWrapper(_client.GetStream());
         }
 
-        public void Dispose()
+        public void Close()
         {
-            StopSending();
-            _udpClient.Dispose();
+            _client.Close();
+        }
+    }
+
+    public class TcpListenerWrapper : ITcpListener
+    {
+        private readonly TcpListener _listener;
+
+        public TcpListenerWrapper(TcpListener listener)
+        {
+            _listener = listener;
+        }
+
+        public void Start() => _listener.Start();
+        public void Stop() => _listener.Stop();
+
+        public async Task<ITcpClient> AcceptTcpClientAsync()
+        {
+            var client = await _listener.AcceptTcpClientAsync();
+            return new TcpClientWrapper(client);
+        }
+    }
+
+    public class TcpListenerFactory : ITcpListenerFactory
+    {
+        public ITcpListener CreateListener(int port)
+        {
+            var listener = new TcpListener(IPAddress.Any, port);
+            return new TcpListenerWrapper(listener);
         }
     }
 }
