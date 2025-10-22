@@ -363,30 +363,40 @@ namespace NetSdrClientAppTests
         public async Task Stop_ShouldStopServer()
         {
             // Arrange
+            var mockClient = new Mock<ITcpClientWrapper>();
+            var mockStream = new Mock<INetworkStreamWrapper>();
+
+            mockStream
+                .Setup(s => s.ReadAsync(
+                    It.IsAny<byte[]>(), 
+                    It.IsAny<int>(), 
+                    It.IsAny<int>(), 
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(0);
+
+            mockClient.Setup(c => c.GetStream()).Returns(mockStream.Object);
+
             _mockListener
                 .Setup(l => l.AcceptTcpClientAsync())
-                .Returns(async () =>
+                .Returns(() =>
                 {
-                    await Task.Delay(10000);
-                    throw new ObjectDisposedException("listener");
+                    return Task.FromResult(mockClient.Object);
                 });
 
             var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
             
-            var startTask = Task.Run(() => server.StartAsync());
-            await Task.Delay(100); // Дати серверу час на старт
+            var startTask = Task.Run(async () => 
+            {
+                await Task.Delay(10);
+                await server.StartAsync();
+            });
+            
+            await Task.Delay(50);
 
             // Act
             server.Stop();
             
-            try
-            {
-                await startTask;
-            }
-            catch
-            {
-                // Expected exception
-            }
+            await Task.Delay(50);
 
             // Assert
             _mockLogger.Verify(l => l.Log("Server stopped."), Times.Once);
@@ -412,23 +422,12 @@ namespace NetSdrClientAppTests
             // Arrange
             _mockListener
                 .Setup(l => l.AcceptTcpClientAsync())
-                .ThrowsAsync(new OperationCanceledException());
+                .ThrowsAsync(new ObjectDisposedException("listener"));
 
             var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
 
             // Act
-            var startTask = Task.Run(() => server.StartAsync());
-            await Task.Delay(50);
-            server.Stop();
-
-            try
-            {
-                await startTask;
-            }
-            catch
-            {
-                // Expected
-            }
+            await server.StartAsync();
 
             // Assert
             _mockListener.Verify(l => l.Start(), Times.Once);
@@ -545,24 +544,13 @@ namespace NetSdrClientAppTests
                         acceptCount++;
                         return Task.FromResult(mockClient2.Object);
                     }
-                    throw new OperationCanceledException();
+                    throw new ObjectDisposedException("listener");
                 });
 
             var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
 
             // Act
-            var startTask = Task.Run(() => server.StartAsync());
-            await Task.Delay(200);
-            server.Stop();
-
-            try
-            {
-                await startTask;
-            }
-            catch
-            {
-                // Expected
-            }
+            await server.StartAsync();
 
             // Assert
             _mockLogger.Verify(l => l.Log("Client connected."), Times.AtLeast(2));
