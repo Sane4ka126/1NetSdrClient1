@@ -405,5 +405,221 @@ namespace NetSdrClientAppTests
             // Assert
             _mockLogger.Verify(l => l.Log("Server stopped."), Times.Once);
         }
+
+        [Test]
+        public async Task StartAsync_ShouldLogServerStarted()
+        {
+            // Arrange
+            _mockListener
+                .Setup(l => l.AcceptTcpClientAsync())
+                .ThrowsAsync(new OperationCanceledException());
+
+            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
+
+            // Act
+            var startTask = Task.Run(() => server.StartAsync());
+            await Task.Delay(50);
+            server.Stop();
+
+            try
+            {
+                await startTask;
+            }
+            catch
+            {
+                // Expected
+            }
+
+            // Assert
+            _mockListener.Verify(l => l.Start(), Times.Once);
+            _mockLogger.Verify(l => l.Log(It.Is<string>(s => s.Contains("Echo server started"))), Times.Once);
+        }
+
+        [Test]
+        public async Task StartAsync_ShouldHandleObjectDisposedException()
+        {
+            // Arrange
+            var mockClient = new Mock<ITcpClientWrapper>();
+            var mockStream = new Mock<INetworkStreamWrapper>();
+
+            mockStream
+                .Setup(s => s.ReadAsync(
+                    It.IsAny<byte[]>(), 
+                    It.IsAny<int>(), 
+                    It.IsAny<int>(), 
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(0);
+
+            mockClient.Setup(c => c.GetStream()).Returns(mockStream.Object);
+
+            var acceptCount = 0;
+            _mockListener
+                .Setup(l => l.AcceptTcpClientAsync())
+                .Returns(() =>
+                {
+                    if (acceptCount++ == 0)
+                    {
+                        return Task.FromResult(mockClient.Object);
+                    }
+                    throw new ObjectDisposedException("listener");
+                });
+
+            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
+
+            // Act
+            await server.StartAsync();
+
+            // Assert
+            _mockLogger.Verify(l => l.Log(It.Is<string>(s => s.Contains("Echo server stopped"))), Times.Once);
+        }
+
+        [Test]
+        public async Task StartAsync_ShouldHandleExceptionInAccept()
+        {
+            // Arrange
+            var mockClient = new Mock<ITcpClientWrapper>();
+            var mockStream = new Mock<INetworkStreamWrapper>();
+
+            mockStream
+                .Setup(s => s.ReadAsync(
+                    It.IsAny<byte[]>(), 
+                    It.IsAny<int>(), 
+                    It.IsAny<int>(), 
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(0);
+
+            mockClient.Setup(c => c.GetStream()).Returns(mockStream.Object);
+
+            var acceptCount = 0;
+            _mockListener
+                .Setup(l => l.AcceptTcpClientAsync())
+                .Returns(() =>
+                {
+                    if (acceptCount++ == 0)
+                    {
+                        return Task.FromResult(mockClient.Object);
+                    }
+                    throw new Exception("Socket error");
+                });
+
+            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
+
+            // Act
+            await server.StartAsync();
+
+            // Assert
+            _mockLogger.Verify(l => l.LogError(It.Is<string>(s => s.Contains("Socket error"))), Times.Once);
+        }
+
+        [Test]
+        public async Task StartAsync_ShouldAcceptMultipleClients()
+        {
+            // Arrange
+            var mockClient1 = new Mock<ITcpClientWrapper>();
+            var mockClient2 = new Mock<ITcpClientWrapper>();
+            var mockStream = new Mock<INetworkStreamWrapper>();
+
+            mockStream
+                .Setup(s => s.ReadAsync(
+                    It.IsAny<byte[]>(), 
+                    It.IsAny<int>(), 
+                    It.IsAny<int>(), 
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(0);
+
+            mockClient1.Setup(c => c.GetStream()).Returns(mockStream.Object);
+            mockClient2.Setup(c => c.GetStream()).Returns(mockStream.Object);
+
+            var acceptCount = 0;
+            _mockListener
+                .Setup(l => l.AcceptTcpClientAsync())
+                .Returns(() =>
+                {
+                    if (acceptCount == 0)
+                    {
+                        acceptCount++;
+                        return Task.FromResult(mockClient1.Object);
+                    }
+                    else if (acceptCount == 1)
+                    {
+                        acceptCount++;
+                        return Task.FromResult(mockClient2.Object);
+                    }
+                    throw new OperationCanceledException();
+                });
+
+            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
+
+            // Act
+            var startTask = Task.Run(() => server.StartAsync());
+            await Task.Delay(200);
+            server.Stop();
+
+            try
+            {
+                await startTask;
+            }
+            catch
+            {
+                // Expected
+            }
+
+            // Assert
+            _mockLogger.Verify(l => l.Log("Client connected."), Times.AtLeast(2));
+        }
+
+        [Test]
+        public async Task HandleClientAsync_ShouldCloseClient()
+        {
+            // Arrange
+            var mockClient = new Mock<ITcpClientWrapper>();
+            var mockStream = new Mock<INetworkStreamWrapper>();
+
+            mockStream
+                .Setup(s => s.ReadAsync(
+                    It.IsAny<byte[]>(), 
+                    It.IsAny<int>(), 
+                    It.IsAny<int>(), 
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(0);
+
+            mockClient.Setup(c => c.GetStream()).Returns(mockStream.Object);
+
+            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
+            var cts = new CancellationTokenSource();
+
+            // Act
+            await server.HandleClientAsync(mockClient.Object, cts.Token);
+
+            // Assert
+            mockClient.Verify(c => c.Close(), Times.Once);
+        }
+
+        [Test]
+        public async Task HandleClientAsync_ShouldDisposeStream()
+        {
+            // Arrange
+            var mockClient = new Mock<ITcpClientWrapper>();
+            var mockStream = new Mock<INetworkStreamWrapper>();
+
+            mockStream
+                .Setup(s => s.ReadAsync(
+                    It.IsAny<byte[]>(), 
+                    It.IsAny<int>(), 
+                    It.IsAny<int>(), 
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(0);
+
+            mockClient.Setup(c => c.GetStream()).Returns(mockStream.Object);
+
+            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
+            var cts = new CancellationTokenSource();
+
+            // Act
+            await server.HandleClientAsync(mockClient.Object, cts.Token);
+
+            // Assert
+            mockStream.Verify(s => s.Dispose(), Times.Once);
+        }
     }
 }
