@@ -6,15 +6,27 @@ using System.Threading.Tasks;
 
 namespace EchoServer
 {
-    // Інтерфейс для покращення тестованості
-    public interface INetworkStreamWrapper
+    // Інтерфейси для тестованості - використовуємо мінімальний набір
+    public interface ILogger
+    {
+        void Log(string message);
+    }
+
+    public class ConsoleLogger : ILogger
+    {
+        public void Log(string message)
+        {
+            Console.WriteLine(message);
+        }
+    }
+
+    public interface INetworkStream : IDisposable
     {
         Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token);
         Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken token);
-        void Close();
     }
 
-    public class NetworkStreamWrapper : INetworkStreamWrapper
+    public class NetworkStreamWrapper : INetworkStream
     {
         private readonly NetworkStream _stream;
 
@@ -33,50 +45,49 @@ namespace EchoServer
             return _stream.WriteAsync(buffer, offset, count, token);
         }
 
-        public void Close()
+        public void Dispose()
         {
-            _stream.Close();
+            _stream?.Dispose();
         }
     }
 
-    public interface ITcpClientWrapper
+    public interface ITcpClientAdapter : IDisposable
     {
-        INetworkStreamWrapper GetStream();
-        void Close();
+        INetworkStream GetStream();
     }
 
-    public class TcpClientWrapper : ITcpClientWrapper
+    public class TcpClientAdapter : ITcpClientAdapter
     {
         private readonly TcpClient _client;
 
-        public TcpClientWrapper(TcpClient client)
+        public TcpClientAdapter(TcpClient client)
         {
             _client = client;
         }
 
-        public INetworkStreamWrapper GetStream()
+        public INetworkStream GetStream()
         {
             return new NetworkStreamWrapper(_client.GetStream());
         }
 
-        public void Close()
+        public void Dispose()
         {
-            _client.Close();
+            _client?.Dispose();
         }
     }
 
-    public interface ITcpListenerWrapper
+    public interface ITcpListenerAdapter
     {
         void Start();
         void Stop();
-        Task<ITcpClientWrapper> AcceptTcpClientAsync();
+        Task<ITcpClientAdapter> AcceptTcpClientAsync();
     }
 
-    public class TcpListenerWrapper : ITcpListenerWrapper
+    public class TcpListenerAdapter : ITcpListenerAdapter
     {
         private readonly TcpListener _listener;
 
-        public TcpListenerWrapper(IPAddress address, int port)
+        public TcpListenerAdapter(IPAddress address, int port)
         {
             _listener = new TcpListener(address, port);
         }
@@ -91,23 +102,10 @@ namespace EchoServer
             _listener.Stop();
         }
 
-        public async Task<ITcpClientWrapper> AcceptTcpClientAsync()
+        public async Task<ITcpClientAdapter> AcceptTcpClientAsync()
         {
             var client = await _listener.AcceptTcpClientAsync();
-            return new TcpClientWrapper(client);
-        }
-    }
-
-    public interface ILogger
-    {
-        void Log(string message);
-    }
-
-    public class ConsoleLogger : ILogger
-    {
-        public void Log(string message)
-        {
-            Console.WriteLine(message);
+            return new TcpClientAdapter(client);
         }
     }
 
@@ -115,21 +113,21 @@ namespace EchoServer
     {
         private readonly int _port;
         private readonly ILogger _logger;
-        private readonly Func<IPAddress, int, ITcpListenerWrapper> _listenerFactory;
-        private ITcpListenerWrapper _listener;
+        private readonly Func<IPAddress, int, ITcpListenerAdapter> _listenerFactory;
+        private ITcpListenerAdapter? _listener;
         private CancellationTokenSource _cancellationTokenSource;
         private const int BufferSize = 8192;
 
         // Конструктор з dependency injection
-        public EchoServer(int port, ILogger logger = null, 
-            Func<IPAddress, int, ITcpListenerWrapper> listenerFactory = null)
+        public EchoServer(int port, ILogger? logger = null, 
+            Func<IPAddress, int, ITcpListenerAdapter>? listenerFactory = null)
         {
             if (port <= 0 || port > 65535)
                 throw new ArgumentOutOfRangeException(nameof(port), "Port must be between 1 and 65535");
 
             _port = port;
             _logger = logger ?? new ConsoleLogger();
-            _listenerFactory = listenerFactory ?? ((addr, p) => new TcpListenerWrapper(addr, p));
+            _listenerFactory = listenerFactory ?? ((addr, p) => new TcpListenerAdapter(addr, p));
             _cancellationTokenSource = new CancellationTokenSource();
         }
 
@@ -143,7 +141,7 @@ namespace EchoServer
             {
                 try
                 {
-                    ITcpClientWrapper client = await _listener.AcceptTcpClientAsync();
+                    ITcpClientAdapter client = await _listener.AcceptTcpClientAsync();
                     _logger.Log("Client connected.");
 
                     _ = Task.Run(() => HandleClientAsync(client, _cancellationTokenSource.Token));
@@ -163,32 +161,32 @@ namespace EchoServer
             _logger.Log("Server shutdown.");
         }
 
-        internal async Task HandleClientAsync(ITcpClientWrapper client, CancellationToken token)
+        internal async Task HandleClientAsync(ITcpClientAdapter client, CancellationToken token)
         {
-            INetworkStreamWrapper stream = null;
-            try
+            using (client)
+            using (INetworkStream stream = client.GetStream())
             {
-                stream = client.GetStream();
-                byte[] buffer = new byte[BufferSize];
-                int bytesRead;
-
-                while (!token.IsCancellationRequested && 
-                       (bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
+                try
                 {
-                    // Echo back the received message
-                    await stream.WriteAsync(buffer, 0, bytesRead, token);
-                    _logger.Log($"Echoed {bytesRead} bytes to the client.");
+                    byte[] buffer = new byte[BufferSize];
+                    int bytesRead;
+
+                    while (!token.IsCancellationRequested && 
+                           (bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
+                    {
+                        // Echo back the received message
+                        await stream.WriteAsync(buffer, 0, bytesRead, token);
+                        _logger.Log($"Echoed {bytesRead} bytes to the client.");
+                    }
                 }
-            }
-            catch (Exception ex) when (!(ex is OperationCanceledException))
-            {
-                _logger.Log($"Error: {ex.Message}");
-            }
-            finally
-            {
-                stream?.Close();
-                client.Close();
-                _logger.Log("Client disconnected.");
+                catch (Exception ex) when (!(ex is OperationCanceledException))
+                {
+                    _logger.Log($"Error: {ex.Message}");
+                }
+                finally
+                {
+                    _logger.Log("Client disconnected.");
+                }
             }
         }
 
@@ -234,8 +232,9 @@ namespace EchoServer
         private readonly string _host;
         private readonly int _port;
         private readonly UdpClient _udpClient;
-        private Timer _timer;
+        private Timer? _timer;
         private ushort _sequenceNumber = 0;
+        private bool _disposed = false;
 
         public UdpTimedSender(string host, int port)
         {
@@ -252,7 +251,7 @@ namespace EchoServer
             _timer = new Timer(SendMessageCallback, null, 0, intervalMilliseconds);
         }
 
-        private void SendMessageCallback(object state)
+        private void SendMessageCallback(object? state)
         {
             try
             {
@@ -282,10 +281,23 @@ namespace EchoServer
             _timer = null;
         }
 
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    StopSending();
+                    _udpClient?.Dispose();
+                }
+                _disposed = true;
+            }
+        }
+
         public void Dispose()
         {
-            StopSending();
-            _udpClient.Dispose();
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
     }
 }
