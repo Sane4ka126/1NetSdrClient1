@@ -10,7 +10,7 @@ namespace EchoServer
         private readonly int _port;
         private readonly ITcpListenerFactory _listenerFactory;
         private readonly ILogger _logger;
-        private ITcpListener _listener;
+        private ITcpListener? _listener;
         private CancellationTokenSource _cancellationTokenSource;
 
         public int ClientsHandled { get; private set; }
