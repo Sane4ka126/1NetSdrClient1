@@ -23,10 +23,10 @@
     <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
   </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\NetSdrClientApp\NetSdrClientApp.csproj" />
-  </ItemGroup>
-
+ <ItemGroup>
+  <ProjectReference Include="..\EchoTspServer\EchoServer.csproj" />
+  <ProjectReference Include="..\NetSdrClientApp\NetSdrClientApp.csproj" />
+</ItemGroup>
   <ItemGroup>
     <Using Include="NUnit.Framework" />
   </ItemGroup>
