@@ -1,18 +1,17 @@
 using System;
 using System.Threading.Tasks;
-using EchoServer.Abstractions;
-using EchoServer.Services;
+using EchoServer.Interfaces;
+using EchoServer.Wrappers;
 
 namespace EchoServer
 {
-    public class Program
+    class Program
     {
-        public static async Task Main(string[] args)
+        static async Task Main(string[] args)
         {
-            ILogger logger = new ConsoleLogger();
-            ITcpListenerFactory listenerFactory = new TcpListenerFactory();
-
-            EchoServerService server = new EchoServerService(5000, logger, listenerFactory);
+            var logger = new ConsoleLogger();
+            var listenerFactory = new TcpListenerFactory();
+            var server = new EchoServer(5000, listenerFactory, logger);
 
             _ = Task.Run(() => server.StartAsync());
 
@@ -20,19 +19,25 @@ namespace EchoServer
             int port = 60000;
             int intervalMilliseconds = 5000;
 
-            using (var sender = new UdpTimedSender(host, port, logger))
+            using (var udpClient = new UdpClientWrapper())
+            using (var sender = new UdpTimedSender(
+                host, 
+                port, 
+                udpClient, 
+                new RandomMessageGenerator(), 
+                logger))
             {
-                logger.Log("Press any key to stop sending...");
+                Console.WriteLine("Press any key to stop sending...");
                 sender.StartSending(intervalMilliseconds);
 
-                logger.Log("Press 'q' to quit...");
+                Console.WriteLine("Press 'q' to quit...");
                 while (Console.ReadKey(intercept: true).Key != ConsoleKey.Q)
                 {
                 }
 
                 sender.StopSending();
                 server.Stop();
-                logger.Log("Sender stopped.");
+                Console.WriteLine("Application stopped.");
             }
         }
     }
