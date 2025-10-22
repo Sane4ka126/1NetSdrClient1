@@ -1,6 +1,4 @@
 using System;
-using System.Linq;
-using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using EchoServer.Abstractions;
@@ -9,64 +7,90 @@ namespace EchoServer.Services
 {
     public class UdpTimedSender : IDisposable
     {
+        private readonly ILogger _logger;
         private readonly string _host;
         private readonly int _port;
-        private readonly ILogger _logger;
-        private readonly UdpClient _udpClient;
-        private Timer? _timer;
-        private ushort _counter = 0;
+        private UdpClient _udpClient;
+        private Timer _timer;
+        private bool _isRunning;
+        private bool _disposed;
 
         public UdpTimedSender(string host, int port, ILogger logger)
         {
+            if (logger == null)
+                throw new ArgumentNullException(nameof(logger));
+
             _host = host;
             _port = port;
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _logger = logger;
             _udpClient = new UdpClient();
         }
 
-        public void StartSending(int intervalMilliseconds)
+        public void StartSending(int intervalMs)
         {
-            if (_timer != null)
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(UdpTimedSender));
+
+            if (_isRunning)
                 throw new InvalidOperationException("Sender is already running.");
 
-            _timer = new Timer(SendMessageCallback, null, 0, intervalMilliseconds);
-        }
+            _isRunning = true;
 
-        private void SendMessageCallback(object? state)
-        {
-            try
+            var random = new Random();
+            _timer = new Timer(state =>
             {
-                Random rnd = new Random();
-                byte[] samples = new byte[1024];
-                rnd.NextBytes(samples);
-                _counter++;
+                if (_disposed) return;
 
-                byte[] msg = (new byte[] { 0x04, 0x84 })
-                    .Concat(BitConverter.GetBytes(_counter))
-                    .Concat(samples)
-                    .ToArray();
-                    
-                var endpoint = new IPEndPoint(IPAddress.Parse(_host), _port);
-
-                _udpClient.Send(msg, msg.Length, endpoint);
-                _logger.Log($"Message sent to {_host}:{_port}");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error sending message: {ex.Message}");
-            }
+                try
+                {
+                    byte[] data = new byte[100];
+                    random.NextBytes(data);
+                    _udpClient.Send(data, data.Length, _host, _port);
+                    _logger.Log($"UDP data sent to {_host}:{_port}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Error sending UDP data: {ex.Message}");
+                }
+            }, null, 0, intervalMs);
         }
 
         public void StopSending()
         {
+            if (_disposed)
+                return;
+
+            if (!_isRunning)
+                return;
+
             _timer?.Dispose();
             _timer = null;
+            _isRunning = false;
+            _logger.Log("UDP sender stopped.");
         }
 
         public void Dispose()
         {
-            StopSending();
-            _udpClient.Dispose();
+            if (_disposed)
+                return;
+
+            _disposed = true;
+
+            try
+            {
+                if (_isRunning)
+                {
+                    _timer?.Dispose();
+                    _isRunning = false;
+                }
+            }
+            catch
+            {
+                // Ігноруємо помилки при зупинці
+            }
+
+            _udpClient?.Dispose();
+            _udpClient = null;
         }
     }
 }
