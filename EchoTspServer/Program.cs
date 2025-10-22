@@ -8,16 +8,46 @@ using System.Linq;
 
 namespace EchoServer
 {
+    // Інтерфейс для абстракції логування
+    public interface ILogger
+    {
+        void LogInfo(string message);
+        void LogError(string message);
+    }
+
+    // Консольний логер для продакшн-коду
+    public class ConsoleLogger : ILogger
+    {
+        public void LogInfo(string message) => Console.WriteLine(message);
+        public void LogError(string message) => Console.WriteLine($"Error: {message}");
+    }
+
+    // Тихий логер для тестів
+    public class NullLogger : ILogger
+    {
+        public void LogInfo(string message) { }
+        public void LogError(string message) { }
+    }
+
     public class EchoServer
     {
         private readonly int _port;
-        private TcpListener? _listener;
-        private readonly CancellationTokenSource _cancellationTokenSource;
+        private TcpListener _listener;
+        private CancellationTokenSource _cancellationTokenSource;
+        private readonly ILogger _logger;
+        private Task _serverTask;
+        private int _actualPort;
 
-        // Constructor
-        public EchoServer(int port)
+        // Властивості для тестування
+        public int ActualPort => _actualPort;
+        public bool IsRunning => _serverTask != null && !_serverTask.IsCompleted;
+        public int ActiveConnections { get; private set; }
+
+        // Конструктор з інверсією залежностей
+        public EchoServer(int port, ILogger logger = null)
         {
             _port = port;
+            _logger = logger ?? new NullLogger();
             _cancellationTokenSource = new CancellationTokenSource();
         }
 
@@ -25,28 +55,48 @@ namespace EchoServer
         {
             _listener = new TcpListener(IPAddress.Any, _port);
             _listener.Start();
-            Console.WriteLine($"Server started on port {_port}.");
+            
+            // Отримуємо реальний порт (важливо для порту 0)
+            _actualPort = ((IPEndPoint)_listener.LocalEndpoint).Port;
+            _logger.LogInfo($"Server started on port {_actualPort}.");
 
             while (!_cancellationTokenSource.Token.IsCancellationRequested)
             {
                 try
                 {
                     TcpClient client = await _listener.AcceptTcpClientAsync();
-                    Console.WriteLine("Client connected.");
+                    _logger.LogInfo("Client connected.");
+                    Interlocked.Increment(ref ActiveConnections);
 
                     _ = Task.Run(() => HandleClientAsync(client, _cancellationTokenSource.Token));
                 }
                 catch (ObjectDisposedException)
                 {
-                    // Listener has been closed
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    if (!_cancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        _logger.LogError($"Accept error: {ex.Message}");
+                    }
                     break;
                 }
             }
 
-            Console.WriteLine("Server shutdown.");
+            _logger.LogInfo("Server shutdown.");
         }
 
-        private static async Task HandleClientAsync(TcpClient client, CancellationToken token)
+        // Метод для неблокуючого запуску
+        public void Start()
+        {
+            if (_serverTask != null)
+                throw new InvalidOperationException("Server is already running.");
+
+            _serverTask = Task.Run(() => StartAsync());
+        }
+
+        private async Task HandleClientAsync(TcpClient client, CancellationToken token)
         {
             using (NetworkStream stream = client.GetStream())
             {
@@ -56,21 +106,21 @@ namespace EchoServer
                     int bytesRead;
 
                     while (!token.IsCancellationRequested && 
-                           (bytesRead = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), token)) > 0)
+                           (bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
                     {
-                        // Echo back the received message
-                        await stream.WriteAsync(buffer.AsMemory(0, bytesRead), token);
-                        Console.WriteLine($"Echoed {bytesRead} bytes to the client.");
+                        await stream.WriteAsync(buffer, 0, bytesRead, token);
+                        _logger.LogInfo($"Echoed {bytesRead} bytes to the client.");
                     }
                 }
                 catch (Exception ex) when (!(ex is OperationCanceledException))
                 {
-                    Console.WriteLine($"Error: {ex.Message}");
+                    _logger.LogError($"Client error: {ex.Message}");
                 }
                 finally
                 {
+                    Interlocked.Decrement(ref ActiveConnections);
                     client.Close();
-                    Console.WriteLine("Client disconnected.");
+                    _logger.LogInfo("Client disconnected.");
                 }
             }
         }
@@ -79,37 +129,59 @@ namespace EchoServer
         {
             _cancellationTokenSource.Cancel();
             _listener?.Stop();
-            Console.WriteLine("Server stopped.");
+            _logger.LogInfo("Server stopped.");
+        }
+
+        // Метод для коректного очищення ресурсів
+        public async Task StopAsync(TimeSpan timeout = default)
+        {
+            if (timeout == default)
+                timeout = TimeSpan.FromSeconds(5);
+
+            Stop();
+
+            if (_serverTask != null)
+            {
+                var completed = await Task.WhenAny(_serverTask, Task.Delay(timeout));
+                if (completed != _serverTask)
+                {
+                    _logger.LogError("Server did not stop gracefully within timeout.");
+                }
+            }
+
+            _cancellationTokenSource?.Dispose();
         }
 
         public static async Task Main(string[] args)
         {
-            EchoServer server = new EchoServer(5000);
+            var logger = new ConsoleLogger();
+            EchoServer server = new EchoServer(5000, logger);
 
-            // Start the server in a separate task
-            _ = Task.Run(() => server.StartAsync());
+            // Запуск сервера
+            server.Start();
 
-            string host = "127.0.0.1"; // Target IP
-            int port = 60000;          // Target Port
-            int intervalMilliseconds = 5000; // Send every 5 seconds
+            // Очікуємо, поки сервер запуститься
+            await Task.Delay(500);
 
-            using (var sender = new UdpTimedSender(host, port))
+            string host = "127.0.0.1";
+            int port = 60000;
+            int intervalMilliseconds = 5000;
+
+            using (var sender = new UdpTimedSender(host, port, logger))
             {
-                Console.WriteLine("Press any key to stop sending...");
+                logger.LogInfo("Press any key to stop sending...");
                 sender.StartSending(intervalMilliseconds);
 
-                Console.WriteLine("Press 'q' to quit...");
+                logger.LogInfo("Press 'q' to quit...");
                 while (Console.ReadKey(intercept: true).Key != ConsoleKey.Q)
                 {
-                    // Just wait until 'q' is pressed
+                    // Чекаємо натискання 'q'
                 }
 
                 sender.StopSending();
-                server.Stop();
-                Console.WriteLine("Sender stopped.");
+                await server.StopAsync();
+                logger.LogInfo("Application stopped.");
             }
-
-            await Task.CompletedTask;
         }
     }
 
@@ -118,15 +190,17 @@ namespace EchoServer
         private readonly string _host;
         private readonly int _port;
         private readonly UdpClient _udpClient;
-        private Timer? _timer;
-        private bool _disposed;
+        private readonly ILogger _logger;
+        private Timer _timer;
         private ushort _counter;
 
-        public UdpTimedSender(string host, int port)
+        public UdpTimedSender(string host, int port, ILogger logger = null)
         {
             _host = host;
             _port = port;
             _udpClient = new UdpClient();
+            _logger = logger ?? new NullLogger();
+            _counter = 0;
         }
 
         public void StartSending(int intervalMilliseconds)
@@ -137,11 +211,11 @@ namespace EchoServer
             _timer = new Timer(SendMessageCallback, null, 0, intervalMilliseconds);
         }
 
-        private void SendMessageCallback(object? state)
+        private void SendMessageCallback(object state)
         {
             try
             {
-                // Dummy data
+                // Генерація даних
                 Random rnd = new Random();
                 byte[] samples = new byte[1024];
                 rnd.NextBytes(samples);
@@ -151,14 +225,15 @@ namespace EchoServer
                     .Concat(BitConverter.GetBytes(_counter))
                     .Concat(samples)
                     .ToArray();
+                
                 var endpoint = new IPEndPoint(IPAddress.Parse(_host), _port);
 
                 _udpClient.Send(msg, msg.Length, endpoint);
-                Console.WriteLine($"Message sent to {_host}:{_port}");
+                _logger.LogInfo($"Message sent to {_host}:{_port}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error sending message: {ex.Message}");
+                _logger.LogError($"Error sending message: {ex.Message}");
             }
         }
 
@@ -168,24 +243,10 @@ namespace EchoServer
             _timer = null;
         }
 
-        protected virtual void Dispose(bool disposing)
-        {
-            if (!_disposed)
-            {
-                if (disposing)
-                {
-                    StopSending();
-                    _udpClient.Dispose();
-                }
-
-                _disposed = true;
-            }
-        }
-
         public void Dispose()
         {
-            Dispose(disposing: true);
-            GC.SuppressFinalize(this);
+            StopSending();
+            _udpClient?.Dispose();
         }
     }
 }
