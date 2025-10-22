@@ -1,148 +1,37 @@
 using System;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace EchoServer
 {
-    // Інтерфейси для тестованості - використовуємо мінімальний набір
-    public interface ILogger
-    {
-        void Log(string message);
-    }
-
-    public class ConsoleLogger : ILogger
-    {
-        public void Log(string message)
-        {
-            Console.WriteLine(message);
-        }
-    }
-
-    public interface INetworkStream : IDisposable
-    {
-        Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token);
-        Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken token);
-    }
-
-    public class NetworkStreamWrapper : INetworkStream
-    {
-        private readonly NetworkStream _stream;
-
-        public NetworkStreamWrapper(NetworkStream stream)
-        {
-            _stream = stream;
-        }
-
-        public Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token)
-        {
-            return _stream.ReadAsync(buffer, offset, count, token);
-        }
-
-        public Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken token)
-        {
-            return _stream.WriteAsync(buffer, offset, count, token);
-        }
-
-        public void Dispose()
-        {
-            _stream?.Dispose();
-        }
-    }
-
-    public interface ITcpClientAdapter : IDisposable
-    {
-        INetworkStream GetStream();
-    }
-
-    public class TcpClientAdapter : ITcpClientAdapter
-    {
-        private readonly TcpClient _client;
-
-        public TcpClientAdapter(TcpClient client)
-        {
-            _client = client;
-        }
-
-        public INetworkStream GetStream()
-        {
-            return new NetworkStreamWrapper(_client.GetStream());
-        }
-
-        public void Dispose()
-        {
-            _client?.Dispose();
-        }
-    }
-
-    public interface ITcpListenerAdapter
-    {
-        void Start();
-        void Stop();
-        Task<ITcpClientAdapter> AcceptTcpClientAsync();
-    }
-
-    public class TcpListenerAdapter : ITcpListenerAdapter
-    {
-        private readonly TcpListener _listener;
-
-        public TcpListenerAdapter(IPAddress address, int port)
-        {
-            _listener = new TcpListener(address, port);
-        }
-
-        public void Start()
-        {
-            _listener.Start();
-        }
-
-        public void Stop()
-        {
-            _listener.Stop();
-        }
-
-        public async Task<ITcpClientAdapter> AcceptTcpClientAsync()
-        {
-            var client = await _listener.AcceptTcpClientAsync();
-            return new TcpClientAdapter(client);
-        }
-    }
-
     public class EchoServer
     {
         private readonly int _port;
-        private readonly ILogger _logger;
-        private readonly Func<IPAddress, int, ITcpListenerAdapter> _listenerFactory;
-        private ITcpListenerAdapter? _listener;
+        private TcpListener _listener;
         private CancellationTokenSource _cancellationTokenSource;
-        private const int BufferSize = 8192;
 
-        // Конструктор з dependency injection
-        public EchoServer(int port, ILogger? logger = null, 
-            Func<IPAddress, int, ITcpListenerAdapter>? listenerFactory = null)
+        //constuctor
+        public EchoServer(int port)
         {
-            if (port <= 0 || port > 65535)
-                throw new ArgumentOutOfRangeException(nameof(port), "Port must be between 1 and 65535");
-
             _port = port;
-            _logger = logger ?? new ConsoleLogger();
-            _listenerFactory = listenerFactory ?? ((addr, p) => new TcpListenerAdapter(addr, p));
             _cancellationTokenSource = new CancellationTokenSource();
         }
 
         public async Task StartAsync()
         {
-            _listener = _listenerFactory(IPAddress.Any, _port);
+            _listener = new TcpListener(IPAddress.Any, _port);
             _listener.Start();
-            _logger.Log($"Server started on port {_port}.");
+            Console.WriteLine($"Server started on port {_port}.");
 
             while (!_cancellationTokenSource.Token.IsCancellationRequested)
             {
                 try
                 {
-                    ITcpClientAdapter client = await _listener.AcceptTcpClientAsync();
-                    _logger.Log("Client connected.");
+                    TcpClient client = await _listener.AcceptTcpClientAsync();
+                    Console.WriteLine("Client connected.");
 
                     _ = Task.Run(() => HandleClientAsync(client, _cancellationTokenSource.Token));
                 }
@@ -151,41 +40,35 @@ namespace EchoServer
                     // Listener has been closed
                     break;
                 }
-                catch (Exception ex)
-                {
-                    _logger.Log($"Error accepting client: {ex.Message}");
-                    break;
-                }
             }
 
-            _logger.Log("Server shutdown.");
+            Console.WriteLine("Server shutdown.");
         }
 
-        internal async Task HandleClientAsync(ITcpClientAdapter client, CancellationToken token)
+        private async Task HandleClientAsync(TcpClient client, CancellationToken token)
         {
-            using (client)
-            using (INetworkStream stream = client.GetStream())
+            using (NetworkStream stream = client.GetStream())
             {
                 try
                 {
-                    byte[] buffer = new byte[BufferSize];
+                    byte[] buffer = new byte[8192];
                     int bytesRead;
 
-                    while (!token.IsCancellationRequested && 
-                           (bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
+                    while (!token.IsCancellationRequested && (bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
                     {
                         // Echo back the received message
                         await stream.WriteAsync(buffer, 0, bytesRead, token);
-                        _logger.Log($"Echoed {bytesRead} bytes to the client.");
+                        Console.WriteLine($"Echoed {bytesRead} bytes to the client.");
                     }
                 }
                 catch (Exception ex) when (!(ex is OperationCanceledException))
                 {
-                    _logger.Log($"Error: {ex.Message}");
+                    Console.WriteLine($"Error: {ex.Message}");
                 }
                 finally
                 {
-                    _logger.Log("Client disconnected.");
+                    client.Close();
+                    Console.WriteLine("Client disconnected.");
                 }
             }
         }
@@ -193,9 +76,9 @@ namespace EchoServer
         public void Stop()
         {
             _cancellationTokenSource.Cancel();
-            _listener?.Stop();
+            _listener.Stop();
             _cancellationTokenSource.Dispose();
-            _logger.Log("Server stopped.");
+            Console.WriteLine("Server stopped.");
         }
 
         public static async Task Main(string[] args)
@@ -205,9 +88,9 @@ namespace EchoServer
             // Start the server in a separate task
             _ = Task.Run(() => server.StartAsync());
 
-            string host = "127.0.0.1";
-            int port = 60000;
-            int intervalMilliseconds = 5000;
+            string host = "127.0.0.1"; // Target IP
+            int port = 60000;          // Target Port
+            int intervalMilliseconds = 5000; // Send every 3 seconds
 
             using (var sender = new UdpTimedSender(host, port))
             {
@@ -227,14 +110,13 @@ namespace EchoServer
         }
     }
 
+
     public class UdpTimedSender : IDisposable
     {
         private readonly string _host;
         private readonly int _port;
         private readonly UdpClient _udpClient;
-        private Timer? _timer;
-        private ushort _sequenceNumber = 0;
-        private bool _disposed = false;
+        private Timer _timer;
 
         public UdpTimedSender(string host, int port)
         {
@@ -251,23 +133,23 @@ namespace EchoServer
             _timer = new Timer(SendMessageCallback, null, 0, intervalMilliseconds);
         }
 
-        private void SendMessageCallback(object? state)
+        ushort i = 0;
+
+        private void SendMessageCallback(object state)
         {
             try
             {
+                //dummy data
                 Random rnd = new Random();
                 byte[] samples = new byte[1024];
                 rnd.NextBytes(samples);
-                _sequenceNumber++;
+                i++;
 
-                byte[] msg = new byte[] { 0x04, 0x84 }
-                    .Concat(BitConverter.GetBytes(_sequenceNumber))
-                    .Concat(samples)
-                    .ToArray();
-                
+                byte[] msg = (new byte[] { 0x04, 0x84 }).Concat(BitConverter.GetBytes(i)).Concat(samples).ToArray();
                 var endpoint = new IPEndPoint(IPAddress.Parse(_host), _port);
+
                 _udpClient.Send(msg, msg.Length, endpoint);
-                Console.WriteLine($"Message sent to {_host}:{_port}");
+                Console.WriteLine($"Message sent to {_host}:{_port} ");
             }
             catch (Exception ex)
             {
@@ -281,23 +163,10 @@ namespace EchoServer
             _timer = null;
         }
 
-        protected virtual void Dispose(bool disposing)
-        {
-            if (!_disposed)
-            {
-                if (disposing)
-                {
-                    StopSending();
-                    _udpClient?.Dispose();
-                }
-                _disposed = true;
-            }
-        }
-
         public void Dispose()
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
+            StopSending();
+            _udpClient.Dispose();
         }
     }
 }
