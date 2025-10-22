@@ -129,16 +129,16 @@ namespace NetSdrClientAppTests
             var cts = new CancellationTokenSource();
 
             mockStream.Setup(s => s.ReadAsync(It.IsAny<byte[]>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((byte[] buffer, int offset, int count, CancellationToken token) =>
+                .Returns<byte[], int, int, CancellationToken>((buffer, offset, count, token) =>
                 {
                     cts.Cancel();
                     token.ThrowIfCancellationRequested();
-                    return 5;
+                    return Task.FromResult(5);
                 });
 
             var server = new EchoServer.EchoServer(5000, _mockFactory.Object, _mockLogger.Object);
-            Assert.ThrowsAsync<OperationCanceledException>(() => 
-                server.ProcessEchoStreamAsync(mockStream.Object, cts.Token));
+            Assert.ThrowsAsync<OperationCanceledException>(async () => 
+                await server.ProcessEchoStreamAsync(mockStream.Object, cts.Token));
         }
 
         [Test]
