@@ -45,10 +45,10 @@ namespace NetSdrClientAppTests
                     It.IsAny<int>(), 
                     It.IsAny<int>(), 
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync((byte[] buffer, int offset, int count, CancellationToken token) =>
+                .Returns((byte[] buffer, int offset, int count, CancellationToken token) =>
                 {
                     Array.Copy(receivedData, 0, buffer, offset, receivedData.Length);
-                    return receivedData.Length;
+                    return Task.FromResult(receivedData.Length);
                 })
                 .ReturnsAsync(0);
 
@@ -159,15 +159,15 @@ namespace NetSdrClientAppTests
                     It.IsAny<int>(), 
                     It.IsAny<int>(), 
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync((byte[] buffer, int offset, int count, CancellationToken token) =>
+                .Returns((byte[] buffer, int offset, int count, CancellationToken token) =>
                 {
                     Array.Copy(message1, 0, buffer, offset, message1.Length);
-                    return message1.Length;
+                    return Task.FromResult(message1.Length);
                 })
-                .ReturnsAsync((byte[] buffer, int offset, int count, CancellationToken token) =>
+                .Returns((byte[] buffer, int offset, int count, CancellationToken token) =>
                 {
                     Array.Copy(message2, 0, buffer, offset, message2.Length);
-                    return message2.Length;
+                    return Task.FromResult(message2.Length);
                 })
                 .ReturnsAsync(0);
 
