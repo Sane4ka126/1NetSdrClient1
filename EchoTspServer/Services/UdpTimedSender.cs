@@ -1,5 +1,6 @@
 using System;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Threading;
 using EchoServer.Abstractions;
 
@@ -33,7 +34,6 @@ namespace EchoServer.Services
                 throw new InvalidOperationException("Sender is already running.");
 
             _isRunning = true;
-            var random = new Random();
 
             _timer = new Timer(state =>
             {
@@ -42,7 +42,11 @@ namespace EchoServer.Services
                 try
                 {
                     byte[] data = new byte[100];
-                    random.NextBytes(data);
+                    // Use cryptographically secure random for security compliance
+                    using (var rng = RandomNumberGenerator.Create())
+                    {
+                        rng.GetBytes(data);
+                    }
                     _udpClient?.Send(data, data.Length, _host, _port);
                     _logger.Log($"UDP data sent to {_host}:{_port}");
                 }
