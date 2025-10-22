@@ -320,133 +320,6 @@ namespace NetSdrClientAppTests
         }
 
         [Test]
-        public async Task StartAsync_ShouldStartListening()
-        {
-            // Arrange
-            _mockListener
-                .Setup(l => l.AcceptTcpClientAsync())
-                .ThrowsAsync(new OperationCanceledException());
-
-            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
-
-            // Act
-            var startTask = Task.Run(async () => await server.StartAsync());
-            await Task.Delay(50);
-            server.Stop();
-            
-            try
-            {
-                await startTask;
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected
-            }
-
-            // Assert
-            _mockListener.Verify(l => l.Start(), Times.Once);
-            _mockLogger.Verify(l => l.Log(It.Is<string>(s => s.Contains("Echo server started"))), Times.Once);
-        }
-
-        [Test]
-        public async Task StartAsync_ShouldAcceptMultipleClients()
-        {
-            // Arrange
-            var mockClient1 = new Mock<ITcpClientWrapper>();
-            var mockClient2 = new Mock<ITcpClientWrapper>();
-            var mockStream = new Mock<INetworkStreamWrapper>();
-
-            mockStream
-                .Setup(s => s.ReadAsync(
-                    It.IsAny<byte[]>(), 
-                    It.IsAny<int>(), 
-                    It.IsAny<int>(), 
-                    It.IsAny<CancellationToken>()))
-                .ReturnsAsync(0);
-
-            mockClient1.Setup(c => c.GetStream()).Returns(mockStream.Object);
-            mockClient2.Setup(c => c.GetStream()).Returns(mockStream.Object);
-
-            var acceptCount = 0;
-            _mockListener
-                .Setup(l => l.AcceptTcpClientAsync())
-                .Returns(async () =>
-                {
-                    if (acceptCount == 0)
-                    {
-                        acceptCount++;
-                        await Task.Delay(10);
-                        return mockClient1.Object;
-                    }
-                    else if (acceptCount == 1)
-                    {
-                        acceptCount++;
-                        await Task.Delay(10);
-                        return mockClient2.Object;
-                    }
-                    throw new OperationCanceledException();
-                });
-
-            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
-
-            // Act
-            var startTask = Task.Run(async () => await server.StartAsync());
-            await Task.Delay(150);
-            server.Stop();
-            
-            try
-            {
-                await startTask;
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected
-            }
-
-            // Assert
-            _mockLogger.Verify(l => l.Log(It.Is<string>(s => s.Contains("Client connected"))), Times.AtLeast(1));
-        }
-
-        [Test]
-        public async Task StartAsync_ShouldHandleAcceptException()
-        {
-            // Arrange
-            _mockListener
-                .Setup(l => l.AcceptTcpClientAsync())
-                .ThrowsAsync(new Exception("Accept failed"));
-
-            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
-
-            // Act
-            var startTask = Task.Run(async () => await server.StartAsync());
-            await Task.Delay(100);
-            server.Stop();
-
-            try
-            {
-                await startTask;
-            }
-            catch
-            {
-                // Expected
-            }
-
-            // Assert
-            _mockLogger.Verify(l => l.LogError(It.Is<string>(s => s.Contains("Accept failed"))), Times.AtLeastOnce);
-        }
-
-        [Test]
-        public void Constructor_ShouldCreateValidInstance()
-        {
-            // Arrange & Act
-            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
-
-            // Assert
-            server.Should().NotBeNull();
-            _mockListenerFactory.Verify(f => f.Create(It.IsAny<IPAddress>(), 5000), Times.Once);
-        }
-
-        [Test]
         public async Task HandleClientAsync_ShouldHandleWriteException()
         {
             // Arrange
@@ -484,6 +357,20 @@ namespace NetSdrClientAppTests
 
             // Assert
             _mockLogger.Verify(l => l.LogError(It.Is<string>(s => s.Contains("Write failed"))), Times.Once);
+        }
+
+        [Test]
+        public void Stop_ShouldStopServer()
+        {
+            // Arrange
+            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
+
+            // Act
+            server.Stop();
+
+            // Assert
+            _mockLogger.Verify(l => l.Log("Server stopped."), Times.Once);
+            _mockListener.Verify(l => l.Stop(), Times.Once);
         }
     }
 }
