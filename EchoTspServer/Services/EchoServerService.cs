@@ -12,7 +12,7 @@ namespace EchoServer.Services
         private readonly ILogger _logger;
         private readonly ITcpListenerFactory _listenerFactory;
         private ITcpListenerWrapper? _listener;
-        private CancellationTokenSource _cancellationTokenSource;
+        private readonly CancellationTokenSource _cancellationTokenSource;
 
         public EchoServerService(int port, ILogger logger, ITcpListenerFactory listenerFactory)
         {
@@ -26,7 +26,7 @@ namespace EchoServer.Services
         {
             _listener = _listenerFactory.Create(IPAddress.Any, _port);
             _listener.Start();
-            _logger.Log($"Server started on port {_port}.");
+            _logger.Log($"Echo server started on port {_port}");
 
             while (!_cancellationTokenSource.Token.IsCancellationRequested)
             {
@@ -34,8 +34,11 @@ namespace EchoServer.Services
                 {
                     ITcpClientWrapper client = await _listener.AcceptTcpClientAsync();
                     _logger.Log("Client connected.");
-
                     _ = Task.Run(() => HandleClientAsync(client, _cancellationTokenSource.Token));
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
                 }
                 catch (ObjectDisposedException)
                 {
@@ -44,11 +47,10 @@ namespace EchoServer.Services
                 catch (Exception ex)
                 {
                     _logger.LogError($"Error accepting client: {ex.Message}");
-                    break;
                 }
             }
 
-            _logger.Log("Server shutdown.");
+            _logger.Log("Echo server stopped.");
         }
 
         public async Task HandleClientAsync(ITcpClientWrapper client, CancellationToken token)
@@ -67,7 +69,11 @@ namespace EchoServer.Services
                         _logger.Log($"Echoed {bytesRead} bytes to the client.");
                     }
                 }
-                catch (Exception ex) when (!(ex is OperationCanceledException))
+                catch (OperationCanceledException)
+                {
+                    // Cancellation is expected
+                }
+                catch (Exception ex)
                 {
                     _logger.LogError($"Error: {ex.Message}");
                 }
@@ -83,7 +89,6 @@ namespace EchoServer.Services
         {
             _cancellationTokenSource.Cancel();
             _listener?.Stop();
-            _cancellationTokenSource.Dispose();
             _logger.Log("Server stopped.");
         }
     }
