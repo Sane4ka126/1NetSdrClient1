@@ -360,7 +360,41 @@ namespace NetSdrClientAppTests
         }
 
         [Test]
-        public void Stop_ShouldStopServer()
+        public async Task Stop_ShouldStopServer()
+        {
+            // Arrange
+            _mockListener
+                .Setup(l => l.AcceptTcpClientAsync())
+                .Returns(async () =>
+                {
+                    await Task.Delay(10000);
+                    throw new ObjectDisposedException("listener");
+                });
+
+            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
+            
+            var startTask = Task.Run(() => server.StartAsync());
+            await Task.Delay(100); // Дати серверу час на старт
+
+            // Act
+            server.Stop();
+            
+            try
+            {
+                await startTask;
+            }
+            catch
+            {
+                // Expected exception
+            }
+
+            // Assert
+            _mockLogger.Verify(l => l.Log("Server stopped."), Times.Once);
+            _mockListener.Verify(l => l.Stop(), Times.Once);
+        }
+        
+        [Test]
+        public void Stop_ShouldLogEvenIfNotStarted()
         {
             // Arrange
             var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
@@ -370,7 +404,6 @@ namespace NetSdrClientAppTests
 
             // Assert
             _mockLogger.Verify(l => l.Log("Server stopped."), Times.Once);
-            _mockListener.Verify(l => l.Stop(), Times.Once);
         }
     }
 }
