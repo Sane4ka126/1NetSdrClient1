@@ -10,7 +10,7 @@ namespace NetSdrClientAppTests
     [TestFixture]
     public class UdpTimedSenderTests
     {
-        private Mock<ILogger> _mockLogger;
+        private Mock<ILogger>? _mockLogger;
 
         [SetUp]
         public void SetUp()
@@ -22,7 +22,7 @@ namespace NetSdrClientAppTests
         public void Constructor_ShouldThrowException_WhenLoggerIsNull()
         {
             // Arrange & Act
-            Action act = () => new UdpTimedSender("127.0.0.1", 5000, null);
+            Action act = () => new UdpTimedSender("127.0.0.1", 5000, null!);
 
             // Assert
             act.Should().Throw<ArgumentNullException>()
@@ -33,7 +33,7 @@ namespace NetSdrClientAppTests
         public void StartSending_ShouldThrowException_WhenAlreadyRunning()
         {
             // Arrange
-            using var sender = new UdpTimedSender("127.0.0.1", 5000, _mockLogger.Object);
+            using var sender = new UdpTimedSender("127.0.0.1", 5000, _mockLogger!.Object);
             sender.StartSending(1000);
 
             // Act
@@ -50,7 +50,7 @@ namespace NetSdrClientAppTests
         public void StopSending_ShouldNotThrow_WhenNotStarted()
         {
             // Arrange
-            using var sender = new UdpTimedSender("127.0.0.1", 5000, _mockLogger.Object);
+            using var sender = new UdpTimedSender("127.0.0.1", 5000, _mockLogger!.Object);
 
             // Act
             Action act = () => sender.StopSending();
@@ -63,7 +63,7 @@ namespace NetSdrClientAppTests
         public void Dispose_ShouldStopSending()
         {
             // Arrange
-            var sender = new UdpTimedSender("127.0.0.1", 5000, _mockLogger.Object);
+            var sender = new UdpTimedSender("127.0.0.1", 5000, _mockLogger!.Object);
             sender.StartSending(1000);
 
             // Act
