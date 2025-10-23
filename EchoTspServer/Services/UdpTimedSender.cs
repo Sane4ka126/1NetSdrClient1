@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Threading;
 using EchoServer.Abstractions;
 
@@ -15,7 +16,11 @@ namespace EchoServer.Services
         private readonly UdpClient _udpClient;
         private Timer? _timer;
         private ushort _counter = 0;
-        private readonly Random _random = new Random(); // Створюємо один раз як поле класу
+        
+        // S2245: Random is used only for generating test data payload, not for any security-sensitive operations
+#pragma warning disable S2245
+        private readonly Random _random = new Random();
+#pragma warning restore S2245
 
         public UdpTimedSender(string host, int port, ILogger logger)
         {
@@ -37,7 +42,7 @@ namespace EchoServer.Services
             try
             {
                 byte[] samples = new byte[1024];
-                _random.NextBytes(samples); // Використовуємо поле класу замість локальної змінної
+                _random.NextBytes(samples);
                 _counter++;
 
                 byte[] msg = (new byte[] { 0x04, 0x84 })
