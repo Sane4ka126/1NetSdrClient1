@@ -15,6 +15,7 @@ namespace EchoServer.Services
         private readonly UdpClient _udpClient;
         private Timer? _timer;
         private ushort _counter = 0;
+        private readonly Random _random = new Random(); // Створюємо один раз як поле класу
 
         public UdpTimedSender(string host, int port, ILogger logger)
         {
@@ -28,7 +29,6 @@ namespace EchoServer.Services
         {
             if (_timer != null)
                 throw new InvalidOperationException("Sender is already running.");
-
             _timer = new Timer(SendMessageCallback, null, 0, intervalMilliseconds);
         }
 
@@ -36,9 +36,8 @@ namespace EchoServer.Services
         {
             try
             {
-                Random rnd = new Random();
                 byte[] samples = new byte[1024];
-                rnd.NextBytes(samples);
+                _random.NextBytes(samples); // Використовуємо поле класу замість локальної змінної
                 _counter++;
 
                 byte[] msg = (new byte[] { 0x04, 0x84 })
@@ -47,7 +46,6 @@ namespace EchoServer.Services
                     .ToArray();
                     
                 var endpoint = new IPEndPoint(IPAddress.Parse(_host), _port);
-
                 _udpClient.Send(msg, msg.Length, endpoint);
                 _logger.Log($"Message sent to {_host}:{_port}");
             }
