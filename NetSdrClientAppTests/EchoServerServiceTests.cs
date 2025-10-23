@@ -39,7 +39,6 @@ namespace NetSdrClientAppTests
             byte[]? echoedData = null;
             int readCallCount = 0;
 
-            // Setup: перший виклик повертає дані, другий - 0 (кінець)
             mockStream
                 .Setup(s => s.ReadAsync(
                     It.IsAny<byte[]>(), 
@@ -54,7 +53,7 @@ namespace NetSdrClientAppTests
                         readCallCount++;
                         return receivedData.Length;
                     }
-                    return 0; // Кінець стріму
+                    return 0;
                 });
 
             mockStream
@@ -158,7 +157,6 @@ namespace NetSdrClientAppTests
             byte[] message2 = new byte[] { 4, 5, 6, 7 };
             int readCallCount = 0;
 
-            // Setup: 2 повідомлення, потім 0
             mockStream
                 .Setup(s => s.ReadAsync(
                     It.IsAny<byte[]>(), 
@@ -179,7 +177,7 @@ namespace NetSdrClientAppTests
                         readCallCount++;
                         return message2.Length;
                     }
-                    return 0; // Кінець
+                    return 0;
                 });
 
             int writeCount = 0;
@@ -253,6 +251,143 @@ namespace NetSdrClientAppTests
 
             // Assert
             _mockLogger!.Verify(l => l.Log("Client disconnected."), Times.Once);
+        }
+
+        [Test]
+        public void Stop_ShouldCancelTokenAndStopListener()
+        {
+            // Arrange
+            var server = new EchoServerService(5000, _mockLogger!.Object, _mockListenerFactory!.Object);
+
+            // Act
+            server.Stop();
+
+            // Assert
+            _mockLogger!.Verify(l => l.Log("Server stopped."), Times.Once);
+        }
+
+        [Test]
+        public async Task StartAsync_ShouldStartListenerAndLogMessage()
+        {
+            // Arrange
+            _mockListener!.Setup(l => l.AcceptTcpClientAsync())
+                .ThrowsAsync(new ObjectDisposedException("test"));
+
+            var server = new EchoServerService(5000, _mockLogger!.Object, _mockListenerFactory!.Object);
+
+            // Act
+            var startTask = Task.Run(() => server.StartAsync());
+            await Task.Delay(100);
+            server.Stop();
+            await startTask;
+
+            // Assert
+            _mockListener.Verify(l => l.Start(), Times.Once);
+            _mockLogger!.Verify(l => l.Log(It.Is<string>(s => s.Contains("Server started on port 5000"))), Times.Once);
+            _mockLogger.Verify(l => l.Log("Server shutdown."), Times.Once);
+        }
+
+        [Test]
+        public async Task StartAsync_ShouldHandleAcceptClientException()
+        {
+            // Arrange
+            _mockListener!.Setup(l => l.AcceptTcpClientAsync())
+                .ThrowsAsync(new Exception("Test exception"));
+
+            var server = new EchoServerService(5000, _mockLogger!.Object, _mockListenerFactory!.Object);
+
+            // Act
+            await server.StartAsync();
+
+            // Assert
+            _mockLogger!.Verify(l => l.LogError(It.Is<string>(s => s.Contains("Test exception"))), Times.Once);
+        }
+
+        [Test]
+        public async Task HandleClientAsync_ShouldCloseClientOnOperationCanceled()
+        {
+            // Arrange
+            var mockClient = new Mock<ITcpClientWrapper>();
+            var mockStream = new Mock<INetworkStreamWrapper>();
+            var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            mockStream
+                .Setup(s => s.ReadAsync(
+                    It.IsAny<byte[]>(),
+                    It.IsAny<int>(),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new OperationCanceledException());
+
+            mockClient.Setup(c => c.GetStream()).Returns(mockStream.Object);
+
+            var server = new EchoServerService(5000, _mockLogger!.Object, _mockListenerFactory!.Object);
+
+            // Act
+            await server.HandleClientAsync(mockClient.Object, cts.Token);
+
+            // Assert
+            mockClient.Verify(c => c.Close(), Times.Once);
+            _mockLogger!.Verify(l => l.Log("Client disconnected."), Times.Once);
+        }
+
+        [Test]
+        public async Task HandleClientAsync_ShouldHandleLargeData()
+        {
+            // Arrange
+            var mockClient = new Mock<ITcpClientWrapper>();
+            var mockStream = new Mock<INetworkStreamWrapper>();
+
+            byte[] largeData = new byte[8192]; // Full buffer
+            for (int i = 0; i < largeData.Length; i++)
+                largeData[i] = (byte)(i % 256);
+
+            byte[]? echoedData = null;
+            int readCallCount = 0;
+
+            mockStream
+                .Setup(s => s.ReadAsync(
+                    It.IsAny<byte[]>(),
+                    It.IsAny<int>(),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((byte[] buffer, int offset, int count, CancellationToken token) =>
+                {
+                    if (readCallCount == 0)
+                    {
+                        Array.Copy(largeData, 0, buffer, offset, largeData.Length);
+                        readCallCount++;
+                        return largeData.Length;
+                    }
+                    return 0;
+                });
+
+            mockStream
+                .Setup(s => s.WriteAsync(
+                    It.IsAny<byte[]>(),
+                    It.IsAny<int>(),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback<byte[], int, int, CancellationToken>((buffer, offset, count, token) =>
+                {
+                    echoedData = new byte[count];
+                    Array.Copy(buffer, offset, echoedData, 0, count);
+                })
+                .Returns(Task.CompletedTask);
+
+            mockClient.Setup(c => c.GetStream()).Returns(mockStream.Object);
+
+            var server = new EchoServerService(5000, _mockLogger!.Object, _mockListenerFactory!.Object);
+            var cts = new CancellationTokenSource();
+
+            // Act
+            await server.HandleClientAsync(mockClient.Object, cts.Token);
+
+            // Assert
+            echoedData.Should().NotBeNull();
+            echoedData.Should().HaveCount(8192);
+            echoedData.Should().BeEquivalentTo(largeData);
         }
     }
 }
