@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using System.Threading.Tasks;
 using EchoServer.Abstractions;
 using EchoServer.Services;
 using FluentAssertions;
@@ -23,7 +24,7 @@ namespace NetSdrClientAppTests
         public void Constructor_ShouldThrowException_WhenLoggerIsNull()
         {
             // Arrange & Act
-            Action act = () => new UdpTimedSender("127.0.0.1", 5000, null!);
+            Action act = () => _ = new UdpTimedSender("127.0.0.1", 5000, null!);
 
             // Assert
             act.Should().Throw<ArgumentNullException>()
@@ -76,14 +77,14 @@ namespace NetSdrClientAppTests
         }
 
         [Test]
-        public void StartSending_ShouldLogMessages()
+        public async Task StartSending_ShouldLogMessages()
         {
             // Arrange
             using var sender = new UdpTimedSender("127.0.0.1", 60000, _mockLogger!.Object);
 
             // Act
             sender.StartSending(5000);
-            Thread.Sleep(100);
+            await Task.Delay(100);
 
             // Assert
             sender.StopSending();
@@ -91,14 +92,14 @@ namespace NetSdrClientAppTests
         }
 
         [Test]
-        public void StartSending_ShouldSendMessagesWithIncrementingCounter()
+        public async Task StartSending_ShouldSendMessagesWithIncrementingCounter()
         {
             // Arrange
             using var sender = new UdpTimedSender("127.0.0.1", 60001, _mockLogger!.Object);
 
             // Act
             sender.StartSending(100);
-            Thread.Sleep(350); // Wait for ~3 sends
+            await Task.Delay(350); // Wait for ~3 sends
             sender.StopSending();
 
             // Assert
@@ -108,7 +109,7 @@ namespace NetSdrClientAppTests
         }
 
         [Test]
-        public void StopSending_ShouldStopTimer()
+        public async Task StopSending_ShouldStopTimer()
         {
             // Arrange
             using var sender = new UdpTimedSender("127.0.0.1", 60002, _mockLogger!.Object);
@@ -116,11 +117,11 @@ namespace NetSdrClientAppTests
 
             // Act
             sender.StopSending();
-            Thread.Sleep(300);
+            await Task.Delay(300);
 
             // Assert - no new messages after stop
             _mockLogger!.Invocations.Clear();
-            Thread.Sleep(200);
+            await Task.Delay(200);
             _mockLogger.Verify(l => l.Log(It.IsAny<string>()), Times.Never);
         }
 
@@ -128,7 +129,10 @@ namespace NetSdrClientAppTests
         public void Constructor_ShouldInitializeWithValidParameters()
         {
             // Arrange & Act
-            Action act = () => new UdpTimedSender("192.168.1.1", 8080, _mockLogger!.Object);
+            Action act = () =>
+            {
+                using var sender = new UdpTimedSender("192.168.1.1", 8080, _mockLogger!.Object);
+            };
 
             // Assert
             act.Should().NotThrow();
