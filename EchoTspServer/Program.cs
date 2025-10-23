@@ -1,44 +1,42 @@
 using System;
 using System.Threading.Tasks;
-using EchoServer.Interfaces;
-using EchoServer.Wrappers;
+using EchoServer.Abstractions;
+using EchoServer.Services;
 
 namespace EchoServer
 {
-    class Program
+    public static class Program
     {
-        static async Task Main(string[] args)
+        public static async Task Main(string[] args)
         {
-            var logger = new ConsoleLogger();
-            var listenerFactory = new TcpListenerFactory();
-            var server = new EchoServer(5000, listenerFactory, logger);
+            ConsoleLogger logger = new ConsoleLogger();
+            ITcpListenerFactory listenerFactory = new TcpListenerFactory();
 
-            _ = Task.Run(() => server.StartAsync());
+            EchoServerService server = new EchoServerService(5000, logger, listenerFactory);
+
+            _ = Task.Run(async () => await server.StartAsync());
 
             string host = "127.0.0.1";
             int port = 60000;
             int intervalMilliseconds = 5000;
 
-            using (var udpClient = new UdpClientWrapper())
-            using (var sender = new UdpTimedSender(
-                host, 
-                port, 
-                udpClient, 
-                new RandomMessageGenerator(), 
-                logger))
+            using (var sender = new UdpTimedSender(host, port, logger))
             {
-                Console.WriteLine("Press any key to stop sending...");
+                logger.Log("Press any key to stop sending...");
                 sender.StartSending(intervalMilliseconds);
 
-                Console.WriteLine("Press 'q' to quit...");
+                logger.Log("Press 'q' to quit...");
                 while (Console.ReadKey(intercept: true).Key != ConsoleKey.Q)
                 {
+                    // Wait for 'q' key
                 }
 
                 sender.StopSending();
                 server.Stop();
-                Console.WriteLine("Application stopped.");
+                logger.Log("Sender stopped.");
             }
+
+            await Task.CompletedTask;
         }
     }
 }
