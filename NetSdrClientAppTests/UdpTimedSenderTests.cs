@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using EchoServer.Abstractions;
 using EchoServer.Services;
 using FluentAssertions;
@@ -69,9 +70,7 @@ namespace NetSdrClientAppTests
             // Act
             sender.Dispose();
 
-            // Assert - Timer зупинився, можна перевірити через повторний старт
-            // Після Dispose не можна запустити знову (InvalidOperationException або просто не запускається)
-            // Перевіримо що Dispose не викликає помилок
+            // Assert
             Action act = () => sender.Dispose();
             act.Should().NotThrow();
         }
@@ -84,11 +83,67 @@ namespace NetSdrClientAppTests
 
             // Act
             sender.StartSending(5000);
-            System.Threading.Thread.Sleep(100); // Дати час на один виклик
+            Thread.Sleep(100);
 
             // Assert
             sender.StopSending();
             _mockLogger!.Verify(l => l.Log(It.IsAny<string>()), Times.AtLeastOnce);
+        }
+
+        [Test]
+        public void StartSending_ShouldSendMessagesWithIncrementingCounter()
+        {
+            // Arrange
+            using var sender = new UdpTimedSender("127.0.0.1", 60001, _mockLogger!.Object);
+
+            // Act
+            sender.StartSending(100);
+            Thread.Sleep(350); // Wait for ~3 sends
+            sender.StopSending();
+
+            // Assert
+            _mockLogger!.Verify(
+                l => l.Log(It.Is<string>(s => s.Contains("Message sent to 127.0.0.1:60001"))),
+                Times.AtLeast(2));
+        }
+
+        [Test]
+        public void StopSending_ShouldStopTimer()
+        {
+            // Arrange
+            using var sender = new UdpTimedSender("127.0.0.1", 60002, _mockLogger!.Object);
+            sender.StartSending(100);
+
+            // Act
+            sender.StopSending();
+            Thread.Sleep(300);
+
+            // Assert - no new messages after stop
+            _mockLogger!.Invocations.Clear();
+            Thread.Sleep(200);
+            _mockLogger.Verify(l => l.Log(It.IsAny<string>()), Times.Never);
+        }
+
+        [Test]
+        public void Constructor_ShouldInitializeWithValidParameters()
+        {
+            // Arrange & Act
+            Action act = () => new UdpTimedSender("192.168.1.1", 8080, _mockLogger!.Object);
+
+            // Assert
+            act.Should().NotThrow();
+        }
+
+        [Test]
+        public void Dispose_MultipleCalls_ShouldNotThrow()
+        {
+            // Arrange
+            var sender = new UdpTimedSender("127.0.0.1", 5000, _mockLogger!.Object);
+
+            // Act & Assert
+            sender.Dispose();
+            Action act = () => sender.Dispose();
+            act.Should().NotThrow();
         }
     }
 }
