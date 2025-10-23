@@ -37,20 +37,25 @@ namespace NetSdrClientAppTests
 
             byte[] receivedData = new byte[] { 1, 2, 3, 4, 5 };
             byte[]? echoedData = null;
+            int readCallCount = 0;
 
-            // ✅ ВИПРАВЛЕНО: використовуємо Func<> замість лямбди з параметрами
+            // Setup: перший виклик повертає дані, другий - 0 (кінець)
             mockStream
-                .SetupSequence(s => s.ReadAsync(
+                .Setup(s => s.ReadAsync(
                     It.IsAny<byte[]>(), 
                     It.IsAny<int>(), 
                     It.IsAny<int>(), 
                     It.IsAny<CancellationToken>()))
-                .Returns(Task.FromResult(5))
-                .Callback<byte[], int, int, CancellationToken>((buffer, offset, count, token) =>
+                .ReturnsAsync((byte[] buffer, int offset, int count, CancellationToken token) =>
                 {
-                    Array.Copy(receivedData, 0, buffer, offset, receivedData.Length);
-                })
-                .ReturnsAsync(0);
+                    if (readCallCount == 0)
+                    {
+                        Array.Copy(receivedData, 0, buffer, offset, receivedData.Length);
+                        readCallCount++;
+                        return receivedData.Length;
+                    }
+                    return 0; // Кінець стріму
+                });
 
             mockStream
                 .Setup(s => s.WriteAsync(
@@ -151,25 +156,31 @@ namespace NetSdrClientAppTests
 
             byte[] message1 = new byte[] { 1, 2, 3 };
             byte[] message2 = new byte[] { 4, 5, 6, 7 };
+            int readCallCount = 0;
 
-            // ✅ ВИПРАВЛЕНО: правильний синтаксис для SetupSequence
+            // Setup: 2 повідомлення, потім 0
             mockStream
-                .SetupSequence(s => s.ReadAsync(
+                .Setup(s => s.ReadAsync(
                     It.IsAny<byte[]>(), 
                     It.IsAny<int>(), 
                     It.IsAny<int>(), 
                     It.IsAny<CancellationToken>()))
-                .Returns(Task.FromResult(message1.Length))
-                .Callback<byte[], int, int, CancellationToken>((buffer, offset, count, token) =>
+                .ReturnsAsync((byte[] buffer, int offset, int count, CancellationToken token) =>
                 {
-                    Array.Copy(message1, 0, buffer, offset, message1.Length);
-                })
-                .Returns(Task.FromResult(message2.Length))
-                .Callback<byte[], int, int, CancellationToken>((buffer, offset, count, token) =>
-                {
-                    Array.Copy(message2, 0, buffer, offset, message2.Length);
-                })
-                .ReturnsAsync(0);
+                    if (readCallCount == 0)
+                    {
+                        Array.Copy(message1, 0, buffer, offset, message1.Length);
+                        readCallCount++;
+                        return message1.Length;
+                    }
+                    else if (readCallCount == 1)
+                    {
+                        Array.Copy(message2, 0, buffer, offset, message2.Length);
+                        readCallCount++;
+                        return message2.Length;
+                    }
+                    return 0; // Кінець
+                });
 
             int writeCount = 0;
             mockStream
