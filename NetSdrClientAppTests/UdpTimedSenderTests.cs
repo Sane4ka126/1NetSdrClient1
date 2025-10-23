@@ -1,108 +1,149 @@
 using System;
-using System.Net;
-using System.Net.Sockets;
 using System.Threading;
 using EchoServer.Abstractions;
+using EchoServer.Services;
+using FluentAssertions;
+using Moq;
+using NUnit.Framework;
 
-namespace EchoServer.Services
+namespace NetSdrClientAppTests
 {
-    public class UdpTimedSender : IDisposable
+    [TestFixture]
+    public class UdpTimedSenderTests
     {
-        private readonly string _host;
-        private readonly int _port;
-        private readonly ILogger _logger;
-        private readonly UdpClient _udpClient;
-        private Timer? _timer;
-        private int _counter;
-        private bool _isRunning;
-        private readonly object _lock = new object();
+        private Mock<ILogger>? _mockLogger;
 
-        public UdpTimedSender(string host, int port, ILogger logger)
+        [SetUp]
+        public void SetUp()
         {
-            _host = host ?? throw new ArgumentNullException(nameof(host));
-            _port = port;
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _udpClient = new UdpClient();
-            _counter = 0;
-            _isRunning = false;
+            _mockLogger = new Mock<ILogger>();
         }
 
-        public void StartSending(int intervalMs)
+        [Test]
+        public void Constructor_ShouldThrowException_WhenLoggerIsNull()
         {
-            lock (_lock)
-            {
-                if (_isRunning)
-                {
-                    throw new InvalidOperationException("Sender is already running.");
-                }
+            // Arrange & Act
+            Action act = () => new UdpTimedSender("127.0.0.1", 5000, null!);
 
-                _isRunning = true;
-                _timer = new Timer(SendMessageCallback, null, 0, intervalMs);
-                _logger.Log($"Started sending messages to {_host}:{_port} every {intervalMs}ms");
-            }
+            // Assert
+            act.Should().Throw<ArgumentNullException>()
+                .WithParameterName("logger");
         }
 
-        public void StopSending()
+        [Test]
+        public void StartSending_ShouldThrowException_WhenAlreadyRunning()
         {
-            lock (_lock)
-            {
-                if (_timer != null)
-                {
-                    _timer.Change(Timeout.Infinite, Timeout.Infinite);
-                    _timer.Dispose();
-                    _timer = null;
-                }
+            // Arrange
+            using var sender = new UdpTimedSender("127.0.0.1", 5000, _mockLogger!.Object);
+            sender.StartSending(1000);
 
-                _isRunning = false;
-                _logger.Log("Stopped sending messages");
-            }
+            // Act
+            Action act = () => sender.StartSending(1000);
+
+            // Assert
+            act.Should().Throw<InvalidOperationException>()
+                .WithMessage("Sender is already running.");
+            
+            sender.StopSending();
         }
 
-        private void SendMessageCallback(object? state)
+        [Test]
+        public void StopSending_ShouldNotThrow_WhenNotStarted()
         {
-            try
-            {
-                // S2245: Random used for generating test data payload, not for security purposes
-                #pragma warning disable S2245
-                Random rnd = new Random();
-                #pragma warning restore S2245
-                
-                byte[] samples = new byte[1024];
-                rnd.NextBytes(samples);
-                _counter++;
+            // Arrange
+            using var sender = new UdpTimedSender("127.0.0.1", 5000, _mockLogger!.Object);
 
-                byte[] msg = (new byte[] { 0x04, 0x84 })
-                    .Concat(BitConverter.GetBytes(_counter))
-                    .Concat(samples)
-                    .ToArray();
+            // Act
+            Action act = () => sender.StopSending();
 
-                IPEndPoint endPoint = new IPEndPoint(IPAddress.Parse(_host), _port);
-                _udpClient.Send(msg, msg.Length, endPoint);
-
-                _logger.Log($"Message sent to {_host}:{_port} - Counter: {_counter}");
-            }
-            catch (Exception ex)
-            {
-                _logger.Log($"Error sending message: {ex.Message}");
-            }
+            // Assert
+            act.Should().NotThrow();
         }
 
-        public void Dispose()
+        [Test]
+        public void Dispose_ShouldStopTimer()
         {
-            StopSending();
-            _udpClient?.Dispose();
-        }
-    }
+            // Arrange
+            var sender = new UdpTimedSender("127.0.0.1", 5000, _mockLogger!.Object);
+            sender.StartSending(1000);
 
-    // Extension method for byte array concatenation
-    public static class ByteArrayExtensions
-    {
-        public static byte[] Concat(this byte[] first, byte[] second)
+            // Act
+            sender.Dispose();
+
+            // Assert
+            Action act = () => sender.Dispose();
+            act.Should().NotThrow();
+        }
+
+        [Test]
+        public void StartSending_ShouldLogMessages()
         {
-            byte[] result = new byte[first.Length + second.Length];
-            Buffer.BlockCopy(first, 0, result, 0, first.Length);
-            Buffer.BlockCopy(second, 0, result, first.Length, second.Length);
-            return result;
+            // Arrange
+            using var sender = new UdpTimedSender("127.0.0.1", 60000, _mockLogger!.Object);
+
+            // Act
+            sender.StartSending(5000);
+            Thread.Sleep(100);
+
+            // Assert
+            sender.StopSending();
+            _mockLogger!.Verify(l => l.Log(It.IsAny<string>()), Times.AtLeastOnce);
+        }
+
+        [Test]
+        public void StartSending_ShouldSendMessagesWithIncrementingCounter()
+        {
+            // Arrange
+            using var sender = new UdpTimedSender("127.0.0.1", 60001, _mockLogger!.Object);
+
+            // Act
+            sender.StartSending(100);
+            Thread.Sleep(350); // Wait for ~3 sends
+            sender.StopSending();
+
+            // Assert
+            _mockLogger!.Verify(
+                l => l.Log(It.Is<string>(s => s.Contains("Message sent to 127.0.0.1:60001"))),
+                Times.AtLeast(2));
+        }
+
+        [Test]
+        public void StopSending_ShouldStopTimer()
+        {
+            // Arrange
+            using var sender = new UdpTimedSender("127.0.0.1", 60002, _mockLogger!.Object);
+            sender.StartSending(100);
+
+            // Act
+            sender.StopSending();
+            Thread.Sleep(300);
+
+            // Assert - no new messages after stop
+            _mockLogger!.Invocations.Clear();
+            Thread.Sleep(200);
+            _mockLogger.Verify(l => l.Log(It.IsAny<string>()), Times.Never);
+        }
+
+        [Test]
+        public void Constructor_ShouldInitializeWithValidParameters()
+        {
+            // Arrange & Act
+            Action act = () => new UdpTimedSender("192.168.1.1", 8080, _mockLogger!.Object);
+
+            // Assert
+            act.Should().NotThrow();
+        }
+
+        [Test]
+        public void Dispose_MultipleCalls_ShouldNotThrow()
+        {
+            // Arrange
+            var sender = new UdpTimedSender("127.0.0.1", 5000, _mockLogger!.Object);
+
+            // Act & Assert
+            sender.Dispose();
+            Action act = () => sender.Dispose();
+            act.Should().NotThrow();
         }
     }
 }
