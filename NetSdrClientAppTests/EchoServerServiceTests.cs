@@ -12,9 +12,9 @@ namespace NetSdrClientAppTests
     [TestFixture]
     public class EchoServerServiceTests
     {
-        private Mock<ILogger> _mockLogger;
-        private Mock<ITcpListenerFactory> _mockListenerFactory;
-        private Mock<ITcpListenerWrapper> _mockListener;
+        private Mock<ILogger>? _mockLogger;
+        private Mock<ITcpListenerFactory>? _mockListenerFactory;
+        private Mock<ITcpListenerWrapper>? _mockListener;
 
         [SetUp]
         public void SetUp()
@@ -36,18 +36,19 @@ namespace NetSdrClientAppTests
             var mockStream = new Mock<INetworkStreamWrapper>();
 
             byte[] receivedData = new byte[] { 1, 2, 3, 4, 5 };
-            byte[] echoedData = null;
+            byte[]? echoedData = null;
 
+            // ✅ ВИПРАВЛЕНО: використовуємо Func<> замість лямбди з параметрами
             mockStream
                 .SetupSequence(s => s.ReadAsync(
                     It.IsAny<byte[]>(), 
                     It.IsAny<int>(), 
                     It.IsAny<int>(), 
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync((byte[] buffer, int offset, int count, CancellationToken token) =>
+                .Returns(Task.FromResult(5))
+                .Callback<byte[], int, int, CancellationToken>((buffer, offset, count, token) =>
                 {
                     Array.Copy(receivedData, 0, buffer, offset, receivedData.Length);
-                    return receivedData.Length;
                 })
                 .ReturnsAsync(0);
 
@@ -66,7 +67,7 @@ namespace NetSdrClientAppTests
 
             mockClient.Setup(c => c.GetStream()).Returns(mockStream.Object);
 
-            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
+            var server = new EchoServerService(5000, _mockLogger!.Object, _mockListenerFactory!.Object);
             var cts = new CancellationTokenSource();
 
             // Act
@@ -75,7 +76,7 @@ namespace NetSdrClientAppTests
             // Assert
             echoedData.Should().NotBeNull();
             echoedData.Should().BeEquivalentTo(receivedData);
-            _mockLogger.Verify(l => l.Log(It.Is<string>(s => s.Contains("Echoed 5 bytes"))), Times.Once);
+            _mockLogger!.Verify(l => l.Log(It.Is<string>(s => s.Contains("Echoed 5 bytes"))), Times.Once);
             _mockLogger.Verify(l => l.Log("Client disconnected."), Times.Once);
         }
 
@@ -96,7 +97,7 @@ namespace NetSdrClientAppTests
 
             mockClient.Setup(c => c.GetStream()).Returns(mockStream.Object);
 
-            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
+            var server = new EchoServerService(5000, _mockLogger!.Object, _mockListenerFactory!.Object);
             var cts = new CancellationTokenSource();
 
             // Act
@@ -110,7 +111,7 @@ namespace NetSdrClientAppTests
                     It.IsAny<int>(), 
                     It.IsAny<CancellationToken>()), 
                 Times.Never);
-            _mockLogger.Verify(l => l.Log("Client disconnected."), Times.Once);
+            _mockLogger!.Verify(l => l.Log("Client disconnected."), Times.Once);
         }
 
         [Test]
@@ -130,14 +131,14 @@ namespace NetSdrClientAppTests
 
             mockClient.Setup(c => c.GetStream()).Returns(mockStream.Object);
 
-            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
+            var server = new EchoServerService(5000, _mockLogger!.Object, _mockListenerFactory!.Object);
             var cts = new CancellationTokenSource();
 
             // Act
             await server.HandleClientAsync(mockClient.Object, cts.Token);
 
             // Assert
-            _mockLogger.Verify(l => l.LogError(It.Is<string>(s => s.Contains("Network error"))), Times.Once);
+            _mockLogger!.Verify(l => l.LogError(It.Is<string>(s => s.Contains("Network error"))), Times.Once);
             _mockLogger.Verify(l => l.Log("Client disconnected."), Times.Once);
         }
 
@@ -151,21 +152,22 @@ namespace NetSdrClientAppTests
             byte[] message1 = new byte[] { 1, 2, 3 };
             byte[] message2 = new byte[] { 4, 5, 6, 7 };
 
+            // ✅ ВИПРАВЛЕНО: правильний синтаксис для SetupSequence
             mockStream
                 .SetupSequence(s => s.ReadAsync(
                     It.IsAny<byte[]>(), 
                     It.IsAny<int>(), 
                     It.IsAny<int>(), 
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync((byte[] buffer, int offset, int count, CancellationToken token) =>
+                .Returns(Task.FromResult(message1.Length))
+                .Callback<byte[], int, int, CancellationToken>((buffer, offset, count, token) =>
                 {
                     Array.Copy(message1, 0, buffer, offset, message1.Length);
-                    return message1.Length;
                 })
-                .ReturnsAsync((byte[] buffer, int offset, int count, CancellationToken token) =>
+                .Returns(Task.FromResult(message2.Length))
+                .Callback<byte[], int, int, CancellationToken>((buffer, offset, count, token) =>
                 {
                     Array.Copy(message2, 0, buffer, offset, message2.Length);
-                    return message2.Length;
                 })
                 .ReturnsAsync(0);
 
@@ -181,7 +183,7 @@ namespace NetSdrClientAppTests
 
             mockClient.Setup(c => c.GetStream()).Returns(mockStream.Object);
 
-            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
+            var server = new EchoServerService(5000, _mockLogger!.Object, _mockListenerFactory!.Object);
             var cts = new CancellationTokenSource();
 
             // Act
@@ -189,14 +191,14 @@ namespace NetSdrClientAppTests
 
             // Assert
             writeCount.Should().Be(2);
-            _mockLogger.Verify(l => l.Log(It.Is<string>(s => s.Contains("Echoed"))), Times.Exactly(2));
+            _mockLogger!.Verify(l => l.Log(It.Is<string>(s => s.Contains("Echoed"))), Times.Exactly(2));
         }
 
         [Test]
         public void Constructor_ShouldThrowException_WhenLoggerIsNull()
         {
             // Arrange & Act
-            Action act = () => new EchoServerService(5000, null, _mockListenerFactory.Object);
+            Action act = () => new EchoServerService(5000, null!, _mockListenerFactory!.Object);
 
             // Assert
             act.Should().Throw<ArgumentNullException>()
@@ -207,7 +209,7 @@ namespace NetSdrClientAppTests
         public void Constructor_ShouldThrowException_WhenListenerFactoryIsNull()
         {
             // Arrange & Act
-            Action act = () => new EchoServerService(5000, _mockLogger.Object, null);
+            Action act = () => new EchoServerService(5000, _mockLogger!.Object, null!);
 
             // Assert
             act.Should().Throw<ArgumentNullException>()
@@ -228,22 +230,18 @@ namespace NetSdrClientAppTests
                     It.IsAny<int>(), 
                     It.IsAny<int>(), 
                     It.IsAny<CancellationToken>()))
-                .Returns(async (byte[] buffer, int offset, int count, CancellationToken token) =>
-                {
-                    await Task.Delay(100, token);
-                    return 5;
-                });
+                .ReturnsAsync(5);
 
             mockClient.Setup(c => c.GetStream()).Returns(mockStream.Object);
 
-            var server = new EchoServerService(5000, _mockLogger.Object, _mockListenerFactory.Object);
+            var server = new EchoServerService(5000, _mockLogger!.Object, _mockListenerFactory!.Object);
 
             // Act
             cts.Cancel();
             await server.HandleClientAsync(mockClient.Object, cts.Token);
 
             // Assert
-            _mockLogger.Verify(l => l.Log("Client disconnected."), Times.Once);
+            _mockLogger!.Verify(l => l.Log("Client disconnected."), Times.Once);
         }
     }
 }
