@@ -10,6 +10,7 @@
 [![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=Sane4ka126_1NetSdrClient1&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=Sane4ka126_1NetSdrClient1)
 
 
+
 Цей репозиторій використовується для курсу **реінжиніринг ПЗ**. 
 Мета — провести комплексний реінжиніринг спадкового коду NetSdrClient, включаючи рефакторинг архітектури, покращення якості коду, впровадження сучасних практик розробки та автоматизацію процесів контролю якості через CI/CD пайплайни.
 
